@@ -63,14 +63,12 @@ supports manual dispatch.
 
 When it detects a newer OpenClaw version, it runs the same release helper,
 commits the Dockerfile bump, creates the matching annotated git tag, pushes
-both, and lets the existing publish workflow build and publish the GHCR image.
+both, and publishes the GHCR image in the same workflow run.
 
-To enable that automation, add a repository secret named
-`OPENCLAW_RELEASE_TOKEN` with permission to write repository contents. Use a
-fine-grained personal access token or GitHub App token that can push commits and
-tags to this repository. The default `GITHUB_TOKEN` is not sufficient here,
-because pushes created with it do not trigger the follow-up `push` workflow that
-publishes the Docker image.
+No extra repository secret is required for the scheduled release flow. It uses
+the repository `GITHUB_TOKEN` to push the release commit and tag, and to publish
+the image directly. This avoids relying on a second workflow trigger from the
+automation-created push.
 
 Repository-local agent guidance for this workflow is stored in `AGENTS.md`.
 
