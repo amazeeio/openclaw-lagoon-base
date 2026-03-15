@@ -54,6 +54,24 @@ To also push the branch and tag to `origin`:
 ./scripts/release-openclaw.sh --push
 ```
 
+## Automatic OpenClaw releases
+
+This repository can also release itself automatically when a newer `openclaw`
+npm package is published. The scheduled workflow at
+`.github/workflows/release-openclaw.yml` runs four times per day and also
+supports manual dispatch.
+
+When it detects a newer OpenClaw version, it runs the same release helper,
+commits the Dockerfile bump, creates the matching annotated git tag, pushes
+both, and lets the existing publish workflow build and publish the GHCR image.
+
+To enable that automation, add a repository secret named
+`OPENCLAW_RELEASE_TOKEN` with permission to write repository contents. Use a
+fine-grained personal access token or GitHub App token that can push commits and
+tags to this repository. The default `GITHUB_TOKEN` is not sufficient here,
+because pushes created with it do not trigger the follow-up `push` workflow that
+publishes the Docker image.
+
 Repository-local agent guidance for this workflow is stored in `AGENTS.md`.
 
 ## Consumer usage
