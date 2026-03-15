@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: release-openclaw
@@ -28,26 +29,76 @@ jobs:
         with:
           node-version: 22
 
-      - name: Require release token
-        env:
-          OPENCLAW_RELEASE_TOKEN: ${{ secrets.OPENCLAW_RELEASE_TOKEN }}
-        run: |
-          if [ -z "$OPENCLAW_RELEASE_TOKEN" ]; then
-            echo "OPENCLAW_RELEASE_TOKEN is not configured" >&2
-            exit 1
-          fi
-
       - name: Configure git author
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Configure authenticated remote
-        env:
-          OPENCLAW_RELEASE_TOKEN: ${{ secrets.OPENCLAW_RELEASE_TOKEN }}
+      - name: Record starting commit
+        id: before_release
         run: |
-          git remote set-url origin "https://x-access-token:${OPENCLAW_RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --force --tags origin
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Release latest OpenClaw version if needed
         run: ./scripts/release-openclaw.sh --push
+
+      - name: Detect release result
+        id: release_state
+        run: |
+          current_sha=$(git rev-parse HEAD)
+
+          if [ "$current_sha" = "${{ steps.before_release.outputs.sha }}" ]; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          version=$(perl -ne 'print "$1\n" if /^ARG OPENCLAW_VERSION=(.+)$/ ' Dockerfile | head -n 1)
+
+          if [ -z "$version" ]; then
+            echo "error: could not determine OPENCLAW_VERSION after release" >&2
+            exit 1
+          fi
+
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: steps.release_state.outputs.released == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.release_state.outputs.released == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        if: steps.release_state.outputs.released == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=main
+            type=raw,value=latest
+            type=raw,value=v${{ steps.release_state.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=openclaw-lagoon-base
+            org.opencontainers.image.description=Base OpenClaw Lagoon runtime image
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push image
+        if: steps.release_state.outputs.released == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
