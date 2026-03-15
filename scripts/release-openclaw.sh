@@ -97,7 +97,14 @@ git commit -m "Bump OpenClaw to $target_version"
 git tag -a "$tag_name" -m "Release OpenClaw $target_version"
 
 if [ "$push_release" -eq 1 ]; then
-  git push origin HEAD
+  current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+
+  if [ -z "$current_branch" ]; then
+    echo "error: cannot push release from a detached HEAD" >&2
+    exit 1
+  fi
+
+  git push origin "HEAD:$current_branch"
   git push origin "$tag_name"
 fi
 
