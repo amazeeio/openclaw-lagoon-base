@@ -1,0 +1,6 @@
+# Exclude env files from build context (never bake into images)
+.env
+
+# Git and local data
+.git
+.local
