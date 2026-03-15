@@ -32,6 +32,30 @@ A GitHub Actions workflow at `.github/workflows/publish.yml` builds and publishe
 
 The workflow uses the repository `GITHUB_TOKEN` to publish to GHCR. After the first publish, set the package visibility to public in GitHub Packages if it is not already public.
 
+## Updating OpenClaw
+
+This repository includes a helper script for bumping the packaged OpenClaw version and creating the matching git tag that drives tagged image builds.
+
+```bash
+./scripts/release-openclaw.sh
+```
+
+That command resolves the latest published `openclaw` npm version, updates `ARG OPENCLAW_VERSION` in `Dockerfile`, creates a commit, and creates an annotated tag in the format `v<version>`.
+
+To pin a specific version:
+
+```bash
+./scripts/release-openclaw.sh 2026.3.8
+```
+
+To also push the branch and tag to `origin`:
+
+```bash
+./scripts/release-openclaw.sh --push
+```
+
+Repository-local agent guidance for this workflow is stored in `AGENTS.md`.
+
 ## Consumer usage
 
 A downstream Lagoon repo can reference the published image directly in `docker-compose.yml`:
