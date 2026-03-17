@@ -84,9 +84,9 @@ if [ -t 1 ] && [ -z "$__OC_WELCOMED" ]; then
   # Get gateway token
   __oc_token=$(__oc_get_token)
 
-  # Build full dashboard URL with token
+  # Build full dashboard URL with hash-fragment token
   if [ -n "$__oc_token" ]; then
-    __oc_dashboard_url="${__oc_base_url}?token=${__oc_token}"
+    __oc_dashboard_url="${__oc_base_url}/#token=${__oc_token}"
   else
     __oc_dashboard_url="$__oc_base_url"
   fi
