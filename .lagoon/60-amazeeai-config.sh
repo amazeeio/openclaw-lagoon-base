@@ -38,6 +38,7 @@ const configTemplate = {
     port: gatewayPort,
     mode: 'local',
     controlUi: {
+      dangerouslyDisableDeviceAuth: true,
       allowedOrigins: ['http://localhost:3000', 'https://alpha.amazeeclaw.amazee.ai'],
     },
   }
@@ -178,6 +179,10 @@ if (!config.gateway.mode) {
 }
 if (!config.gateway.controlUi) {
   config.gateway.controlUi = {};
+}
+if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
+  config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+  console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
 }
 
 // Always set allowed origins at startup to ensure secure defaults are enforced.
