@@ -50,9 +50,9 @@ __oc_get_token() {
 __oc_base_url="${LAGOON_ROUTE:-http://localhost:${OPENCLAW_GATEWAY_PORT:-3000}}"
 __oc_token="$(__oc_get_token)"
 
-# Build full dashboard URL with token
+# Build full dashboard URL with hash-fragment token
 if [ -n "$__oc_token" ]; then
-  echo "${__oc_base_url}?token=${__oc_token}"
+  echo "${__oc_base_url}/#token=${__oc_token}"
 else
   echo "$__oc_base_url"
 fi
