@@ -39,7 +39,7 @@ const configTemplate = {
     mode: 'local',
     controlUi: {
       dangerouslyDisableDeviceAuth: true,
-      allowedOrigins: ['http://localhost:3000', 'https://alpha.amazeeclaw.amazee.ai'],
+      allowedOrigins: ['http://localhost:3000', 'http://localhost:4173', 'http://localhost:6006', 'https://alpha.amazeeclaw.amazee.ai', 'https://my.amazee.io', 'https://my.amazeeio.review'],
     },
   }
 };
@@ -206,7 +206,11 @@ const parseLagoonRoutes = (rawRoutes) => {
 
 const fixedAllowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:4173',
+  'http://localhost:6006',
   'https://alpha.amazeeclaw.amazee.ai',
+  'https://my.amazee.io',
+  'https://my.amazeeio.review',
 ];
 
 const lagoonRouteOrigins = parseLagoonRoutes(process.env.LAGOON_ROUTES || '');
