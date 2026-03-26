@@ -24,8 +24,3 @@ Preferred commands:
 - Pin a specific version: `./scripts/release-openclaw.sh 2026.3.8`
 - Commit, tag, and push: `./scripts/release-openclaw.sh --push`
 
-Runtime control rule for this repository:
-
-- When work in this repository requires an OpenClaw gateway restart, reload, reconnect, or configuration refresh, use the tool named `gateway` only.
-- The required call for reload-style requests is the tool named `gateway` with the `restart` action.
-- Do not use the `openclaw` CLI for runtime control, and do not use `kill`, `pkill`, `killall`, `SIGHUP`, `SIGTERM`, `SIGINT`, or `SIGKILL` against OpenClaw processes.
