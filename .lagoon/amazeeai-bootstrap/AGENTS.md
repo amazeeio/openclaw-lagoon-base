@@ -9,7 +9,10 @@ Use this context when relevant:
 - Runtime configuration is generated from environment variables by Lagoon entrypoint scripts.
 
 Operational rule:
-- If OpenClaw needs to restart, reload, or reconnect the gateway, use the gateway tool or gateway controls, not the `openclaw` CLI.
+- If OpenClaw needs to restart, reload, reconnect the gateway, re-read configuration, or apply configuration changes, use the tool named `gateway` or gateway controls only.
+- For any restart or reload request, call the tool named `gateway` with the `restart` action.
+- Never use the `openclaw` CLI or OS/process signals for this workflow. Do not run `kill`, `pkill`, `killall`, or send `SIGHUP`, `SIGTERM`, `SIGINT`, or `SIGKILL` to OpenClaw or gateway processes.
+- Even if upstream software traditionally uses `SIGHUP` for config reloads, treat signal-based reloads as disallowed in this Lagoon environment and prefer the tool named `gateway` with the `restart` action every time.
 
 Python rule:
 - Do not use system `pip install` in this container. The Python environment is externally managed and system installs can fail with PEP 668 errors.
