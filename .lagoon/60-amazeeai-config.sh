@@ -14,8 +14,9 @@ const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(process.env.HOME ||
 const configPath = path.join(stateDir, 'openclaw.json');
 const workspaceDir = process.env.OPENCLAW_WORKSPACE || '/home/.openclaw/workspace';
 const bundledBootstrapSourceDir = '/lagoon/amazeeai-bootstrap';
-const bundledAmazeeBootstrapRelativePath = path.join('amazee', 'AGENTS.md');
-const bundledAmazeeBootstrapTargetPath = path.join(workspaceDir, bundledAmazeeBootstrapRelativePath);
+const bundledSkillsSourceDir = '/lagoon/amazeeai-skills';
+const managedSkillsDir = path.join(stateDir, 'skills');
+const injectedPromptFiles = new Set(['AGENTS.md', 'SOUL.md', 'TOOLS.md']);
 
 console.log('[amazeeai-config] Config path:', configPath);
 
@@ -99,25 +100,100 @@ if (!config.agents.defaults.workspace) {
 }
 
 function ensureBundledBootstrapFiles() {
-  const sourcePath = path.join(bundledBootstrapSourceDir, 'AGENTS.md');
+  if (!fs.existsSync(bundledBootstrapSourceDir)) {
+    console.warn('[amazeeai-config] Bundled bootstrap source not found:', bundledBootstrapSourceDir);
+    return [];
+  }
 
-  if (!fs.existsSync(sourcePath)) {
-    console.warn('[amazeeai-config] Bundled bootstrap source not found:', sourcePath);
+  const seededRelativePaths = [];
+  const pendingDirs = [bundledBootstrapSourceDir];
+
+  while (pendingDirs.length > 0) {
+    const currentDir = pendingDirs.pop();
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const sourcePath = path.join(currentDir, entry.name);
+      const relativePath = path.relative(bundledBootstrapSourceDir, sourcePath);
+
+      if (entry.isDirectory()) {
+        pendingDirs.push(sourcePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const targetPath = path.join(workspaceDir, relativePath);
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.copyFileSync(sourcePath, targetPath);
+      seededRelativePaths.push(relativePath);
+      console.log('[amazeeai-config] Seeded extra bootstrap file:', targetPath);
+    }
+  }
+
+  return seededRelativePaths.sort();
+}
+
+function ensureBundledSkillFiles() {
+  if (!fs.existsSync(bundledSkillsSourceDir)) {
+    console.warn('[amazeeai-config] Bundled skills source not found:', bundledSkillsSourceDir);
+    return [];
+  }
+
+  const seededSkillPaths = [];
+  const pendingDirs = [bundledSkillsSourceDir];
+
+  while (pendingDirs.length > 0) {
+    const currentDir = pendingDirs.pop();
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const sourcePath = path.join(currentDir, entry.name);
+      const relativePath = path.relative(bundledSkillsSourceDir, sourcePath);
+
+      if (entry.isDirectory()) {
+        pendingDirs.push(sourcePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const targetPath = path.join(managedSkillsDir, relativePath);
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.copyFileSync(sourcePath, targetPath);
+      seededSkillPaths.push(relativePath);
+      console.log('[amazeeai-config] Seeded bundled skill file:', targetPath);
+    }
+  }
+
+  return seededSkillPaths.sort();
+}
+
+function getBundledBootstrapExtraFiles(relativePaths) {
+  if (!Array.isArray(relativePaths) || relativePaths.length === 0) {
+    return [];
+  }
+
+  return relativePaths.filter(relativePath => injectedPromptFiles.has(path.basename(relativePath)));
+}
+
+function configureExtraBootstrapHooks(relativePaths) {
+  if (!Array.isArray(relativePaths) || relativePaths.length === 0) {
+    delete config.hooks.internal.entries['bootstrap-extra-files'];
+    console.log('[amazeeai-config] No bundled bootstrap files found; removed bootstrap-extra-files hook');
     return;
   }
 
-  fs.mkdirSync(path.dirname(bundledAmazeeBootstrapTargetPath), { recursive: true });
-  fs.copyFileSync(sourcePath, bundledAmazeeBootstrapTargetPath);
-  console.log('[amazeeai-config] Seeded extra bootstrap file:', bundledAmazeeBootstrapTargetPath);
-}
-
-function configureExtraBootstrapHooks() {
   config.hooks.internal.enabled = true;
   config.hooks.internal.entries['bootstrap-extra-files'] = {
     enabled: true,
-    paths: [bundledAmazeeBootstrapRelativePath],
+    paths: relativePaths,
   };
-  console.log('[amazeeai-config] Enabled hooks.internal.entries.bootstrap-extra-files');
+  console.log('[amazeeai-config] Enabled hooks.internal.entries.bootstrap-extra-files for', relativePaths.length, 'path(s)');
 }
 
 // Initialize compaction memory flush defaults only when not already configured.
@@ -486,12 +562,14 @@ function sanitizeModelInputs() {
 }
 
 async function main() {
-  ensureBundledBootstrapFiles();
+  const bundledWorkspacePaths = ensureBundledBootstrapFiles();
+  ensureBundledSkillFiles();
+  const bootstrapExtraFiles = getBundledBootstrapExtraFiles(bundledWorkspacePaths);
   await discoverModels();
   configureMemorySearchRemoteFromAmazeeai();
   configureGatewayToken();
   configureChannels();
-  configureExtraBootstrapHooks();
+  configureExtraBootstrapHooks(bootstrapExtraFiles);
   sanitizeModelInputs();
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
