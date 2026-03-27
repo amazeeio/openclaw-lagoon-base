@@ -23,3 +23,4 @@ Preferred commands:
 - Dry run or local release preparation: `./scripts/release-openclaw.sh`
 - Pin a specific version: `./scripts/release-openclaw.sh 2026.3.8`
 - Commit, tag, and push: `./scripts/release-openclaw.sh --push`
+
