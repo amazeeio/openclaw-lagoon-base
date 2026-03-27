@@ -22,7 +22,7 @@ This repo is the source of truth for:
 - SSH key bootstrap for Git access
 - amazee.ai model discovery and runtime config generation
 - Shell prompt configuration and dashboard URL helpers
-- Bundled bootstrap instructions copied into the runtime workspace
+- Bundled runtime customizations copied into OpenClaw bootstrap and managed skill locations
 
 Downstream repos should not duplicate these files.
 
@@ -122,3 +122,18 @@ The image expects the same environment variables currently used by OpenClaw Lago
 - `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` for Slack integration
 
 Runtime state is stored under `/home/.openclaw`.
+
+## Bundled customizations
+
+Files under `.lagoon/amazeeai-bootstrap/` are copied into the runtime workspace at boot with their relative paths preserved.
+
+Files under `.lagoon/amazeeai-skills/` are copied into `~/.openclaw/skills/` at boot.
+
+That means bundled OpenClaw customizations should be added there using the final runtime layout, for example:
+
+- `amazee/AGENTS.md` for always-on workspace guidance
+- `.lagoon/amazeeai-skills/<skill-name>/SKILL.md` for managed shared skills
+
+OpenClaw documents `AGENTS.md`, `SOUL.md`, and `TOOLS.md` as injected prompt files, while shared managed skills live separately under `~/.openclaw/skills/<skill>/SKILL.md`.
+
+This repository bundles the amazee AGENTS file and managed shared skills. Bootstrap prompt files and skills are copied by separate functions so `bootstrap-extra-files` only tracks injected prompt files such as `AGENTS.md`, `SOUL.md`, and `TOOLS.md`.
