@@ -9,7 +9,7 @@ The image is published to:
 - `ghcr.io/amazeeio/openclaw-lagoon-base:latest`
 - `ghcr.io/amazeeio/openclaw-lagoon-base:main`
 - `ghcr.io/amazeeio/openclaw-lagoon-base:<git-tag>` for version tags such as `v2026.3.8`
-- `ghcr.io/amazeeio/openclaw-lagoon-base:<git-tag>` for base-only image revisions such as `v2026.4.2_b2`
+- `ghcr.io/amazeeio/openclaw-lagoon-base:<git-tag>` for base-only image revisions such as `v2026.4.2_2`
 
 `latest` is the floating consumer tag. `main` is the integration tag. Version tags are the rollback-safe option.
 
@@ -57,9 +57,9 @@ To publish a base-image-only revision without changing the packaged OpenClaw ver
 ./scripts/release-openclaw.sh --base-revision 2
 ```
 
-That produces a release tag such as `v2026.4.2_b2`.
+That produces a release tag such as `v2026.4.2_2`.
 
-If OpenClaw itself later ships a prerelease such as `2026.4.2-1`, the second base-only revision would be released as `v2026.4.2-1_b2`. The `_b` separator is deliberate because `_` cannot appear in valid npm semver versions.
+If OpenClaw itself later ships a prerelease such as `2026.4.2-1`, the second base-only revision would be released as `v2026.4.2-1_2`. The `_` separator is deliberate because it cannot appear in valid npm semver versions.
 
 To also push the branch and tag to `origin`:
 

@@ -9,10 +9,10 @@ When asked to update OpenClaw in this repository:
 - Use `scripts/release-openclaw.sh` instead of manually editing the version when the task is a version bump or release.
 - Default to discovering the latest published `openclaw` npm version automatically unless the user asks for a specific version.
 - The default git tag format is `v<openclaw-version>`, for example `v2026.3.8`.
-- Base-only image rebuilds should use `v<openclaw-version>_b<n>`, for example `v2026.4.2_b2`.
+- Base-only image rebuilds should use `v<openclaw-version>_<n>`, for example `v2026.4.2_2`.
 - The release flow must create a commit, keep `Dockerfile` aligned to the packaged OpenClaw version, keep `RELEASE_VERSION` aligned to the published image tag, create an annotated git tag with the release version, and push both the branch and the tag when the user asks for a pushed release.
 - Do not create ad hoc tag formats, and do not leave `RELEASE_VERSION` and the git tag out of sync.
-
+we
 Release safety rules:
 
 - Do not force-push.
