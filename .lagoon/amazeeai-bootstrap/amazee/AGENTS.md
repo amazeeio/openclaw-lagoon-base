@@ -19,5 +19,8 @@ Python rule:
 - For reusable Python packages, prefer a persistent virtual environment under `/home/.openclaw/venvs`, for example `python3 -m venv /home/.openclaw/venvs/default && /home/.openclaw/venvs/default/bin/pip install ...`.
 - Use `/tmp` only for throwaway one-off virtual environments.
 
+Executable install rule:
+- Install any user-managed executables or wrapper scripts into `/home/.openclaw/bin` so they are automatically recognized through the container `PATH`.
+
 Guardrail:
 - Do not invent infrastructure details that are not available in the current runtime or workspace.
