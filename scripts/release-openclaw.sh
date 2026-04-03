@@ -11,11 +11,11 @@ while RELEASE_VERSION tracks the published image release version.
 
 When --base-revision is provided, the packaged OpenClaw version stays at the
 specified or current version and the image release version becomes
-<openclaw-version>_b<N>.
+<openclaw-version>_<N>.
 
 Options:
   --base-revision N  Create a base-image-only release suffix such as
-                     2026.4.2_b2 without changing the packaged OpenClaw
+                     2026.4.2_2 without changing the packaged OpenClaw
                      version unless a version argument is also provided.
   --push             Push the release commit and tag to origin after creating them.
   -h                 Show this help.
@@ -118,7 +118,7 @@ if [ -z "$target_version" ]; then
 fi
 
 if [ -n "$base_revision" ]; then
-  target_release_version="${target_version}_b${base_revision}"
+  target_release_version="${target_version}_${base_revision}"
 else
   target_release_version="$target_version"
 fi
