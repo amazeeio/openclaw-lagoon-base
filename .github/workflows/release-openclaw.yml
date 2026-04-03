@@ -53,15 +53,22 @@ jobs:
             exit 0
           fi
 
-          version=$(perl -ne 'print "$1\n" if /^ARG OPENCLAW_VERSION=(.+)$/ ' Dockerfile | head -n 1)
+          package_version=$(perl -ne 'print "$1\n" if /^ARG OPENCLAW_VERSION=(.+)$/ ' Dockerfile | head -n 1)
+          release_version=$(tr -d '\n' < RELEASE_VERSION)
 
-          if [ -z "$version" ]; then
+          if [ -z "$package_version" ]; then
             echo "error: could not determine OPENCLAW_VERSION after release" >&2
             exit 1
           fi
 
+          if [ -z "$release_version" ]; then
+            echo "error: could not determine RELEASE_VERSION after release" >&2
+            exit 1
+          fi
+
           echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         if: steps.release_state.outputs.released == 'true'
@@ -84,11 +91,13 @@ jobs:
           tags: |
             type=raw,value=main
             type=raw,value=latest
-            type=raw,value=v${{ steps.release_state.outputs.version }}
+            type=raw,value=v${{ steps.release_state.outputs.release_version }}
           labels: |
             org.opencontainers.image.title=openclaw-lagoon-base
             org.opencontainers.image.description=Base OpenClaw Lagoon runtime image
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release_state.outputs.release_version }}
+            io.openclaw.version=${{ steps.release_state.outputs.package_version }}
 
       - name: Build and push image
         if: steps.release_state.outputs.released == 'true'

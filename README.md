@@ -9,6 +9,7 @@ The image is published to:
 - `ghcr.io/amazeeio/openclaw-lagoon-base:latest`
 - `ghcr.io/amazeeio/openclaw-lagoon-base:main`
 - `ghcr.io/amazeeio/openclaw-lagoon-base:<git-tag>` for version tags such as `v2026.3.8`
+- `ghcr.io/amazeeio/openclaw-lagoon-base:<git-tag>` for base-only image revisions such as `v2026.4.2_b2`
 
 `latest` is the floating consumer tag. `main` is the integration tag. Version tags are the rollback-safe option.
 
@@ -40,13 +41,25 @@ This repository includes a helper script for bumping the packaged OpenClaw versi
 ./scripts/release-openclaw.sh
 ```
 
-That command resolves the latest published `openclaw` npm version, updates `ARG OPENCLAW_VERSION` in `Dockerfile`, creates a commit, and creates an annotated tag in the format `v<version>`.
+That command resolves the latest published `openclaw` npm version, updates `ARG OPENCLAW_VERSION` in `Dockerfile`, writes the matching image release version to `RELEASE_VERSION`, creates a commit, and creates an annotated git tag in the format `v<release-version>`.
+
+`Dockerfile` remains the source of truth for the packaged OpenClaw version. `RELEASE_VERSION` is the source of truth for the published image release tag.
 
 To pin a specific version:
 
 ```bash
 ./scripts/release-openclaw.sh 2026.3.8
 ```
+
+To publish a base-image-only revision without changing the packaged OpenClaw version:
+
+```bash
+./scripts/release-openclaw.sh --base-revision 2
+```
+
+That produces a release tag such as `v2026.4.2_b2`.
+
+If OpenClaw itself later ships a prerelease such as `2026.4.2-1`, the second base-only revision would be released as `v2026.4.2-1_b2`. The `_b` separator is deliberate because `_` cannot appear in valid npm semver versions.
 
 To also push the branch and tag to `origin`:
 
@@ -62,8 +75,7 @@ npm package is published. The scheduled workflow at
 supports manual dispatch.
 
 When it detects a newer OpenClaw version, it runs the same release helper,
-commits the Dockerfile bump, creates the matching annotated git tag, pushes
-both, and publishes the GHCR image in the same workflow run.
+commits the Dockerfile bump, updates `RELEASE_VERSION`, creates the matching annotated git tag, pushes both, and publishes the GHCR image in the same workflow run.
 
 No extra repository secret is required for the scheduled release flow. It uses
 the repository `GITHUB_TOKEN` to push the release commit and tag, and to publish
