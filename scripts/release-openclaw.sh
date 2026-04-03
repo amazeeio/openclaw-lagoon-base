@@ -86,10 +86,15 @@ if [ -n "$base_revision" ] && ! printf '%s' "$base_revision" | grep -Eq '^[1-9][
   exit 1
 fi
 
-current_version=$(perl -ne 'print "$1\n" if /^ARG OPENCLAW_VERSION=(.+)$/' Dockerfile | head -n 1)
+current_version=$(sed -n 's/^ARG OPENCLAW_VERSION=//p' Dockerfile | head -n 1)
 
 if [ -z "$current_version" ]; then
   echo "error: could not determine current OPENCLAW_VERSION from Dockerfile" >&2
+  exit 1
+fi
+
+if ! printf '%s' "$current_version" | grep -Eq '^[0-9]+(\.[0-9]+){2}([.-][0-9A-Za-z]+)*$'; then
+  echo "error: malformed OPENCLAW_VERSION '$current_version' in Dockerfile" >&2
   exit 1
 fi
 
@@ -114,6 +119,11 @@ fi
 
 if [ -z "$target_version" ]; then
   echo "error: failed to resolve target openclaw version" >&2
+  exit 1
+fi
+
+if ! printf '%s' "$target_version" | grep -Eq '^[0-9]+(\.[0-9]+){2}([.-][0-9A-Za-z]+)*$'; then
+  echo "error: malformed target openclaw version '$target_version'" >&2
   exit 1
 fi
 
