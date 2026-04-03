@@ -3,7 +3,7 @@ FROM node:22-bookworm AS builder
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCLAW_VERSION=2026.4.2
+ARG OPENCLAW_VERSION=a
 RUN npm install -g --ignore-scripts openclaw@${OPENCLAW_VERSION}
 RUN openclaw --version
 
@@ -13,6 +13,24 @@ FROM node:22-bookworm-slim
 RUN npm install -g pnpm
 
 COPY --from=builder /usr/local/lib/node_modules/openclaw /usr/local/lib/node_modules/openclaw
+RUN set -eu; \
+    pkg_dir=/usr/local/lib/node_modules/openclaw; \
+    find "$pkg_dir/dist/extensions" -mindepth 2 -maxdepth 2 -type d -name node_modules | while read -r node_modules_dir; do \
+            find "$node_modules_dir" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | while read -r entry; do \
+                entry_name=$(basename "$entry"); \
+                if [ "$entry_name" = .bin ]; then \
+                    continue; \
+                fi; \
+                if [ "${entry_name#@}" != "$entry_name" ]; then \
+                    mkdir -p "$pkg_dir/node_modules/$entry_name"; \
+                    find "$entry" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | while read -r scoped_entry; do \
+                        ln -sfn "$scoped_entry" "$pkg_dir/node_modules/$entry_name/$(basename "$scoped_entry")"; \
+                    done; \
+                else \
+                    ln -sfn "$entry" "$pkg_dir/node_modules/$entry_name"; \
+                fi; \
+            done; \
+        done
 RUN ln -s /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
 RUN openclaw --version
 
