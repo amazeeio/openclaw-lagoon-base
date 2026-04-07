@@ -1,21 +1,14 @@
 #!/bin/sh
 
-# Rewrite the shipped fenced HEARTBEAT scaffold to the older comment-only form,
-# but only when the workspace file still exactly matches the installed template.
+# Temporary workaround for OpenClaw issue #61492. Keep this runtime rewrite for
+# old workspaces that already copied the legacy fenced HEARTBEAT scaffold, and
+# remove it once upstream fixes the shipped template and existing agents are no
+# longer carrying the bad workspace file forward.
+# Rewrite any already-seeded workspace HEARTBEAT scaffold that still uses the
+# legacy fenced template form shipped by older images.
 node <<'EOFNODE'
 const fs = require('fs');
 const path = require('path');
-
-function stripFrontMatter(content) {
-  if (!content.startsWith('---')) {
-    return content;
-  }
-  const endIndex = content.indexOf('\n---', 3);
-  if (endIndex === -1) {
-    return content;
-  }
-  return content.slice(endIndex + '\n---'.length).replace(/^\s+/, '');
-}
 
 function resolveWorkspaceDir() {
   const envWorkspace = process.env.OPENCLAW_WORKSPACE?.trim();
@@ -42,42 +35,38 @@ function resolveWorkspaceDir() {
   return '/home/.openclaw/workspace';
 }
 
-function deriveHeartbeatScaffold(templateRaw) {
-  const scaffold = stripFrontMatter(templateRaw);
-  const match = scaffold.match(
+function deriveLegacyHeartbeatScaffold(content) {
+  const match = content.match(
     /^# HEARTBEAT\.md Template\s*\n\s*```(?:markdown|md)\s*\n([\s\S]*?)\n```\s*$/i,
   );
   if (!match) {
     return null;
   }
   return {
-    scaffold,
+    scaffold: content,
     normalized: `${match[1].trimEnd()}\n`,
   };
 }
 
-const templatePath =
-  process.env.OPENCLAW_HEARTBEAT_TEMPLATE_PATH ||
-  '/usr/local/lib/node_modules/openclaw/docs/reference/templates/HEARTBEAT.md';
+function ensureTrailingNewline(content) {
+  return content.endsWith('\n') ? content : `${content}\n`;
+}
+
 const heartbeatPath = path.join(resolveWorkspaceDir(), 'HEARTBEAT.md');
 
 try {
-  if (!fs.existsSync(templatePath) || !fs.existsSync(heartbeatPath)) {
-    process.exit(0);
-  }
-
-  const derived = deriveHeartbeatScaffold(fs.readFileSync(templatePath, 'utf8'));
-  if (!derived) {
+  if (!fs.existsSync(heartbeatPath)) {
     process.exit(0);
   }
 
   const current = fs.readFileSync(heartbeatPath, 'utf8');
-  if (current !== derived.scaffold) {
+  const legacyWorkspace = deriveLegacyHeartbeatScaffold(current);
+  if (!legacyWorkspace) {
     process.exit(0);
   }
 
-  fs.writeFileSync(heartbeatPath, derived.normalized, 'utf8');
-  console.log('[heartbeat-hotfix] Rewrote shipped HEARTBEAT scaffold to comment-only form');
+  fs.writeFileSync(heartbeatPath, legacyWorkspace.normalized, 'utf8');
+  console.log('[heartbeat-hotfix] Rewrote workspace HEARTBEAT scaffold to comment-only form');
 } catch (error) {
   console.warn(`[heartbeat-hotfix] Skipped due to error: ${error instanceof Error ? error.message : String(error)}`);
 }

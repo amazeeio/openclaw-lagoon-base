@@ -5,6 +5,47 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 ARG OPENCLAW_VERSION=2026.4.5
 RUN npm install -g --ignore-scripts openclaw@${OPENCLAW_VERSION}
+# Temporary workaround for OpenClaw issue #61492: normalize the packaged
+# HEARTBEAT template at image build time so fresh workspaces copy the fixed
+# comment-only scaffold. Remove once upstream ships the corrected template.
+RUN node <<'EOFNODE'
+const fs = require('fs');
+
+const templatePath = '/usr/local/lib/node_modules/openclaw/docs/reference/templates/HEARTBEAT.md';
+
+function splitFrontMatter(content) {
+    if (!content.startsWith('---')) {
+        return { frontMatter: '', body: content };
+    }
+    const endIndex = content.indexOf('\n---', 3);
+    if (endIndex === -1) {
+        return { frontMatter: '', body: content };
+    }
+    const frontMatter = content.slice(0, endIndex + '\n---'.length);
+    const body = content.slice(endIndex + '\n---'.length).replace(/^\s+/, '');
+    return { frontMatter, body };
+}
+
+function deriveLegacyHeartbeatScaffold(content) {
+    const match = content.match(
+        /^# HEARTBEAT\.md Template\s*\n\s*```(?:markdown|md)\s*\n([\s\S]*?)\n```\s*$/i,
+    );
+    if (!match) {
+        return null;
+    }
+    return `${match[1].trimEnd()}\n`;
+}
+
+const templateRaw = fs.readFileSync(templatePath, 'utf8');
+const { frontMatter, body } = splitFrontMatter(templateRaw);
+const normalized = deriveLegacyHeartbeatScaffold(body);
+
+if (normalized) {
+    const rewrittenTemplate = frontMatter ? `${frontMatter}\n\n${normalized}` : normalized;
+    fs.writeFileSync(templatePath, rewrittenTemplate, 'utf8');
+    console.log('[heartbeat-hotfix] Normalized packaged HEARTBEAT template during image build');
+}
+EOFNODE
 RUN openclaw --version
 
 # Stage 2: Runtime image
