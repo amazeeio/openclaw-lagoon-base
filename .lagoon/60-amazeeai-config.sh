@@ -282,6 +282,7 @@ const parseLagoonRoutes = (rawRoutes) => {
 
 const fixedAllowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:4173',
   'http://localhost:6006',
   'https://alpha.amazeeclaw.amazee.ai',
@@ -372,6 +373,13 @@ async function discoverModels() {
       return inputTypes;
     };
 
+    const resolveModelApi = (modelName) => {
+      const normalizedModelName = String(modelName || '').trim().toLowerCase();
+      return normalizedModelName.startsWith('claude-') || normalizedModelName.includes('claude')
+        ? 'anthropic-messages'
+        : 'openai-completions';
+    };
+
     // Transform models to OpenClaw format from /v1/model/info payload
     const models = data.data.map(m => {
       const info = m.model_info || {};
@@ -383,6 +391,7 @@ async function discoverModels() {
       return {
         id: modelName,
         name: modelName,
+        api: resolveModelApi(modelName),
         reasoning: isReasoningModel(modelName, info),
         input: deriveInputTypes(info),
         cost: {

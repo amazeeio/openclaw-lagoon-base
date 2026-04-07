@@ -71,6 +71,7 @@ RUN chmod +x /bin/fix-permissions /lagoon/entrypoints.sh /lagoon/polydock_claim.
 COPY .lagoon/05-ssh-key.sh /lagoon/entrypoints/05-ssh-key.sh
 COPY .lagoon/50-shell-config.sh /lagoon/entrypoints/50-shell-config.sh
 COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
+COPY .lagoon/65-heartbeat-scaffold-hotfix.sh /lagoon/entrypoints/65-heartbeat-scaffold-hotfix.sh
 COPY .lagoon/ssh_config /etc/ssh/ssh_config
 
 RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
