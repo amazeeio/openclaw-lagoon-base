@@ -1,7 +1,7 @@
 # Stage 1: Install OpenClaw (skip native builds for API-based usage)
 FROM node:22-bookworm AS builder
 
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 ARG OPENCLAW_VERSION=2026.4.12
 RUN npm install -g --ignore-scripts openclaw@${OPENCLAW_VERSION}
@@ -13,29 +13,16 @@ FROM node:22-bookworm-slim
 RUN npm install -g pnpm
 
 COPY --from=builder /usr/local/lib/node_modules/openclaw /usr/local/lib/node_modules/openclaw
-RUN set -eu; \
-    pkg_dir=/usr/local/lib/node_modules/openclaw; \
-    find "$pkg_dir/dist/extensions" -mindepth 2 -maxdepth 2 -type d -name node_modules | while read -r node_modules_dir; do \
-            find "$node_modules_dir" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | while read -r entry; do \
-                entry_name=$(basename "$entry"); \
-                if [ "$entry_name" = .bin ]; then \
-                    continue; \
-                fi; \
-                if [ "${entry_name#@}" != "$entry_name" ]; then \
-                    mkdir -p "$pkg_dir/node_modules/$entry_name"; \
-                    find "$entry" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) | while read -r scoped_entry; do \
-                        ln -sfn "$scoped_entry" "$pkg_dir/node_modules/$entry_name/$(basename "$scoped_entry")"; \
-                    done; \
-                else \
-                    ln -sfn "$entry" "$pkg_dir/node_modules/$entry_name"; \
-                fi; \
-            done; \
-        done
+# The builder installs OpenClaw with --ignore-scripts, so the packaged
+# bundled-plugin postinstall never runs automatically. Run the upstream repair
+# step here so bundled plugin runtime deps are installed at the package root
+# and compiled dist chunks do not hit the missing-module class from #60004.
+RUN node /usr/local/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs
 RUN ln -s /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
 RUN openclaw --version
 
 ARG EXTRA_APT_PACKAGES=""
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     git \
     bash \
