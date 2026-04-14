@@ -26,6 +26,7 @@ fs.mkdirSync(stateDir, { recursive: true });
 // Minimal config template - OpenClaw requires certain base fields to start properly
 // Based on: https://github.com/CrocSwap/clawdbot-docker/blob/main/openclaw.json.template
 const gatewayPort = parseInt(process.env.OPENCLAW_GATEWAY_PORT, 10) || 18789;
+
 const configTemplate = {
   agents: {
     defaults: {
@@ -42,7 +43,10 @@ const configTemplate = {
       dangerouslyDisableDeviceAuth: true,
       allowedOrigins: ['http://localhost:3000', 'http://localhost:4173', 'http://localhost:6006', 'https://alpha.amazeeclaw.amazee.ai', 'https://my.amazee.io', 'https://my.amazeeio.review'],
     },
-  }
+  },
+  update: {
+    checkOnStart: false,
+  },
 };
 
 // Load existing config or initialize from template
@@ -82,6 +86,7 @@ config.models = config.models || {};
 config.models.providers = config.models.providers || {};
 config.tools = config.tools || {};
 config.gateway = config.gateway || {};
+config.update = config.update || {};
 config.channels = config.channels || {};
 config.hooks = config.hooks || {};
 config.hooks.internal = config.hooks.internal || {};
@@ -259,6 +264,11 @@ if (!config.gateway.controlUi) {
 if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
   config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
   console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
+}
+
+if (config.update.checkOnStart === undefined) {
+  config.update.checkOnStart = false;
+  console.log('[amazeeai-config] Set update.checkOnStart to Lagoon default: false');
 }
 
 // Always set allowed origins at startup to ensure secure defaults are enforced.
