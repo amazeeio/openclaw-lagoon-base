@@ -266,9 +266,9 @@ if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
   console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
 }
 
-if (config.update.checkOnStart === undefined) {
+if (config.update.checkOnStart !== false) {
   config.update.checkOnStart = false;
-  console.log('[amazeeai-config] Set update.checkOnStart to Lagoon default: false');
+  console.log('[amazeeai-config] Forced update.checkOnStart to Lagoon default: false');
 }
 
 // Always set allowed origins at startup to ensure secure defaults are enforced.
