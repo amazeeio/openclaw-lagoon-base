@@ -3,7 +3,7 @@ FROM node:22-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCLAW_VERSION=2026.4.15
+ARG OPENCLAW_VERSION=2026.4.20
 RUN npm install -g --ignore-scripts openclaw@${OPENCLAW_VERSION}
 RUN openclaw --version
 
