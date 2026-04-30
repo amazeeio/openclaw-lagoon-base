@@ -59,7 +59,7 @@ try {
     // FIX: Remove deprecated root-level keys that cause schema validation errors
     // These keys were valid in older OpenClaw versions but are now rejected
     const deprecatedRootKeys = ['model', 'defaultModel'];
-    let removedKeys = [];
+    const removedKeys = [];
     for (const key of deprecatedRootKeys) {
       if (config && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, key)) {
         delete config[key];
