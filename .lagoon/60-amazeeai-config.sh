@@ -55,6 +55,21 @@ try {
   if (fs.existsSync(configPath)) {
     config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     console.log('[amazeeai-config] Loaded existing config');
+
+    // FIX: Remove deprecated root-level keys that cause schema validation errors
+    // These keys were valid in older OpenClaw versions but are now rejected
+    const deprecatedRootKeys = ['model', 'defaultModel'];
+    let removedKeys = [];
+    for (const key of deprecatedRootKeys) {
+      if (config.hasOwnProperty(key)) {
+        delete config[key];
+        removedKeys.push(key);
+      }
+    }
+    if (removedKeys.length > 0) {
+      console.log('[amazeeai-config] Removed deprecated root-level keys:', removedKeys.join(', '));
+    }
+
   } else {
     // No config exists - initialize from template
     config = JSON.parse(JSON.stringify(configTemplate));
