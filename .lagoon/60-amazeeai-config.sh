@@ -61,7 +61,7 @@ try {
     const deprecatedRootKeys = ['model', 'defaultModel'];
     let removedKeys = [];
     for (const key of deprecatedRootKeys) {
-      if (config.hasOwnProperty(key)) {
+      if (config && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, key)) {
         delete config[key];
         removedKeys.push(key);
       }
