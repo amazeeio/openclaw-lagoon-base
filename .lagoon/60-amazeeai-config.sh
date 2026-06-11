@@ -601,5 +601,8 @@ main().catch(err => {
 });
 EOFNODE
 
+echo "[amazeeai-config] Running openclaw doctor to repair legacy configurations..."
+openclaw doctor --fix --yes || true
+
 echo "[amazeeai-config] Configuration complete. Starting OpenClaw gateway..."
 echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no output is normal)."
