@@ -601,8 +601,17 @@ main().catch(err => {
 });
 EOFNODE
 
-echo "[amazeeai-config] Running openclaw doctor to repair legacy configurations..."
-openclaw doctor --fix --yes || true
+configPath="/home/.openclaw/openclaw.json"
+if [ -f "$configPath" ]; then
+  OLD_VER=$(jq -r '.meta.lastTouchedVersion // "0"' "$configPath" 2>/dev/null || echo "0")
+  CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
+
+  if [ "$OLD_VER" != "$CURRENT_VER" ]; then
+    echo "[amazeeai-config] Configuration version changed ($OLD_VER -> $CURRENT_VER). Running migrations..."
+    openclaw doctor --post-upgrade --fix --yes || true
+    openclaw doctor --lint || true
+  fi
+fi
 
 echo "[amazeeai-config] Configuration complete. Starting OpenClaw gateway..."
 echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no output is normal)."
