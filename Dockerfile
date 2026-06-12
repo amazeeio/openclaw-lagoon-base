@@ -58,6 +58,7 @@ ENV NODE_ENV=production \
     HOME=/home \
     OPENCLAW_GATEWAY_PORT=3000 \
     OPENCLAW_NO_RESPAWN=1 \
+    OPENCLAW_NO_AUTO_UPDATE=1 \
     XDG_DATA_HOME=/home/.openclaw/.local/share/ \
     PNPM_HOME=/home/.openclaw/.local/share/pnpm \
     npm_config_cache=/tmp/.npm \
