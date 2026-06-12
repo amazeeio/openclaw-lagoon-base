@@ -35,6 +35,12 @@ const configTemplate = {
   },
   tools: {
     profile: 'full',
+    allow: ['*'],
+    exec: {
+      host: 'gateway',
+      security: 'full',
+      ask: 'off'
+    }
   },
   gateway: {
     port: gatewayPort,
@@ -92,10 +98,13 @@ config.hooks = config.hooks || {};
 config.hooks.internal = config.hooks.internal || {};
 config.hooks.internal.entries = config.hooks.internal.entries || {};
 
-if (!config.tools.profile) {
-  config.tools.profile = 'full';
-  console.log('[amazeeai-config] Set tools.profile to default value: full');
-}
+config.tools.profile = 'full';
+config.tools.allow = ['*'];
+config.tools.exec = config.tools.exec || {};
+config.tools.exec.host = 'gateway';
+config.tools.exec.security = 'full';
+config.tools.exec.ask = 'off';
+console.log('[amazeeai-config] Enforced autonomous tool execution defaults (profile=full, allow=*, exec.host=gateway, exec.security=full, exec.ask=off)');
 
 // Ensure required base fields from template are present
 // OpenClaw needs these to start properly
