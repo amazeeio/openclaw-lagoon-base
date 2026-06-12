@@ -1,5 +1,5 @@
 # Stage 1: Install OpenClaw (skip native builds for API-based usage)
-FROM node:22-bookworm AS builder
+FROM node:24-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
@@ -8,7 +8,7 @@ RUN npm install -g --ignore-scripts openclaw@${OPENCLAW_VERSION}
 RUN openclaw --version
 
 # Stage 2: Runtime image
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 
 RUN npm install -g pnpm
 
