@@ -600,6 +600,14 @@ async function main() {
   configureExtraBootstrapHooks(bootstrapExtraFiles);
   sanitizeModelInputs();
 
+  // Ensure MEMORY.md exists in the workspace
+  const memoryMdPath = path.join(workspaceDir, 'MEMORY.md');
+  if (!fs.existsSync(memoryMdPath)) {
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(memoryMdPath, '# Long-Term Memory\n\nThis file contains durable facts, preferences, and standing decisions.\n');
+    console.log('[amazeeai-config] Generated missing MEMORY.md');
+  }
+
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log('[amazeeai-config] Configuration saved to:', configPath);
 }
