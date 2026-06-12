@@ -2,7 +2,7 @@
 FROM uselagoon/commons AS commons
 
 # Stage 2: Build the runtime image from the official OpenClaw image
-ARG OPENCLAW_VERSION=2026.6.5
+ARG OPENCLAW_VERSION=2026.6.6-alpha.2
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
 # Switch to root to perform setup and package installation
