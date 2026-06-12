@@ -42,9 +42,11 @@ COPY .lagoon/polydock_claim.sh /lagoon/polydock_claim.sh
 COPY .lagoon/polydock_post_deploy.sh /lagoon/polydock_post_deploy.sh
 
 RUN chmod +x /bin/fix-permissions /lagoon/entrypoints.sh /lagoon/polydock_claim.sh /lagoon/polydock_post_deploy.sh && \
-    fix-permissions /home
+    fix-permissions /home && \
+    fix-permissions /etc/passwd
 
 COPY .lagoon/05-ssh-key.sh /lagoon/entrypoints/05-ssh-key.sh
+COPY .lagoon/10-passwd.sh /lagoon/entrypoints/10-passwd.sh
 COPY .lagoon/50-shell-config.sh /lagoon/entrypoints/50-shell-config.sh
 COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
 COPY .lagoon/ssh_config /etc/ssh/ssh_config
