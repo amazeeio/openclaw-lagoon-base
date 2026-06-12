@@ -1,9 +1,10 @@
+ARG OPENCLAW_VERSION=2026.6.6-beta.2
+
 # Stage 1: Get Lagoon commons tools
 FROM uselagoon/commons AS commons
 
 # Stage 2: Build the runtime image from the official OpenClaw image
-ARG OPENCLAW_VERSION=2026.6.6-beta.2
-FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
+FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}-browser
 
 # Switch to root to perform setup and package installation
 USER root
