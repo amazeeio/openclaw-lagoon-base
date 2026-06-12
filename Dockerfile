@@ -78,6 +78,9 @@ ENV NODE_ENV=production \
     TMP=/tmp \
     BASH_ENV=/home/.bashrc
 
+RUN chown -R openclaw:openclaw /home/.openclaw && \
+    chmod 700 /home/.openclaw
+
 WORKDIR /home/.openclaw
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--", "/lagoon/entrypoints.sh"]
