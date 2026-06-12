@@ -1,0 +1,14 @@
+# /home/.profile: Sourced by sh/bash on login, or via ENV variable
+
+# If running interactively and we have not already redirected, switch to full bash
+if [ -t 0 ] && [ -z "$__OC_REDIRECTED" ]; then
+  export __OC_REDIRECTED=1
+  if [ -x /bin/bash ]; then
+    exec /bin/bash
+  fi
+fi
+
+# Fallback profile settings if bash is not used
+if [ -f /home/.bashrc ]; then
+  . /home/.bashrc
+fi

@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     nano \
+    vim-tiny \
     openssh-client \
     python3 \
     python3-pip \
@@ -36,6 +37,7 @@ RUN getent group openclaw || groupadd --gid 10000 openclaw && \
 RUN mkdir -p /lagoon/entrypoints /lagoon/bin /home
 COPY .lagoon/entrypoints.sh /lagoon/entrypoints.sh
 COPY .lagoon/bashrc /home/.bashrc
+COPY .lagoon/profile /home/.profile
 COPY .lagoon/amazeeai-bootstrap /lagoon/amazeeai-bootstrap
 COPY .lagoon/amazeeai-skills /lagoon/amazeeai-skills
 COPY .lagoon/polydock_claim.sh /lagoon/polydock_claim.sh
@@ -68,7 +70,8 @@ ENV NODE_ENV=production \
     LAGOON=openclaw \
     TMPDIR=/tmp \
     TMP=/tmp \
-    BASH_ENV=/home/.bashrc
+    BASH_ENV=/home/.bashrc \
+    ENV=/home/.profile
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
     chmod 700 /home/.openclaw
