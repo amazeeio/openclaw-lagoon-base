@@ -86,7 +86,11 @@ try {
 // Ensure nested objects exist and required fields are set
 config.agents = config.agents || {};
 config.agents.defaults = config.agents.defaults || {};
-config.agents.defaults.model = config.agents.defaults.model || {};
+if (typeof config.agents.defaults.model === 'string') {
+  config.agents.defaults.model = { primary: config.agents.defaults.model };
+} else {
+  config.agents.defaults.model = config.agents.defaults.model || {};
+}
 config.agents.defaults.compaction = config.agents.defaults.compaction || {};
 config.models = config.models || {};
 config.models.providers = config.models.providers || {};
@@ -457,9 +461,16 @@ async function discoverModels() {
       } else {
         console.warn(`[amazeeai-config] Warning: AMAZEEAI_DEFAULT_MODEL "${defaultModel}" not found in discovered models`);
         console.warn('[amazeeai-config] Available models:', modelIds.join(', '));
+        if (modelIds.length > 0) {
+          config.agents.defaults.model.primary = `amazeeai/${modelIds[0]}`;
+          console.log('[amazeeai-config] Falling back to first discovered model:', config.agents.defaults.model.primary);
+        }
       }
+    } else if (modelIds.length > 0) {
+      config.agents.defaults.model.primary = `amazeeai/${modelIds[0]}`;
+      console.log('[amazeeai-config] No AMAZEEAI_DEFAULT_MODEL set; defaulting to first discovered model:', config.agents.defaults.model.primary);
     } else {
-      console.log('[amazeeai-config] No AMAZEEAI_DEFAULT_MODEL set; leaving default model config unchanged');
+      console.log('[amazeeai-config] No AMAZEEAI_DEFAULT_MODEL set and no models discovered; leaving default model config unchanged');
     }
   } catch (error) {
     console.error('[amazeeai-config] Model discovery failed:', error.message);
