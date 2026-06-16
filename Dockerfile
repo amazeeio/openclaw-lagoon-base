@@ -80,7 +80,7 @@ ENV NODE_ENV=production \
     BASH_ENV=/home/.bashrc
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
-    chmod 700 /home/.openclaw
+    fix-permissions /home/.openclaw
 
 WORKDIR /home/.openclaw
 EXPOSE 3000
