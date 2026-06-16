@@ -341,30 +341,76 @@ async function discoverModels() {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    const response = await fetch(`${baseUrl}/v1/model/info`, { headers });
+    let data;
+    let format = 'info';
+    let success = false;
 
-    if (!response.ok) {
-      console.error(`[amazeeai-config] Failed to fetch model info: ${response.status} ${response.statusText}`);
+    // Try /v1/model/info
+    try {
+      console.log('[amazeeai-config] Attempting model discovery from /v1/model/info...');
+      const response = await fetch(`${baseUrl}/v1/model/info`, { headers });
+      if (response.ok) {
+        const payload = await response.json();
+        if (payload.data && Array.isArray(payload.data)) {
+          data = payload;
+          format = 'info';
+          success = true;
+        }
+      } else {
+        console.warn(`[amazeeai-config] /v1/model/info returned status ${response.status}`);
+      }
+    } catch (e) {
+      console.warn('[amazeeai-config] /v1/model/info fetch error:', e.message);
+    }
+
+    // Fallback 1: Try /v1/models
+    if (!success) {
+      try {
+        console.log('[amazeeai-config] Attempting model discovery from /v1/models...');
+        const response = await fetch(`${baseUrl}/v1/models`, { headers });
+        if (response.ok) {
+          const payload = await response.json();
+          const list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.data) ? payload.data : null);
+          if (list) {
+            data = { data: list };
+            format = 'list';
+            success = true;
+          }
+        } else {
+          console.warn(`[amazeeai-config] /v1/models returned status ${response.status}`);
+        }
+      } catch (e) {
+        console.warn('[amazeeai-config] /v1/models fetch error:', e.message);
+      }
+    }
+
+    // Fallback 2: Try /models
+    if (!success) {
+      try {
+        console.log('[amazeeai-config] Attempting model discovery from /models...');
+        const response = await fetch(`${baseUrl}/models`, { headers });
+        if (response.ok) {
+          const payload = await response.json();
+          const list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.data) ? payload.data : null);
+          if (list) {
+            data = { data: list };
+            format = 'list';
+            success = true;
+          }
+        } else {
+          console.warn(`[amazeeai-config] /models returned status ${response.status}`);
+        }
+      } catch (e) {
+        console.warn('[amazeeai-config] /models fetch error:', e.message);
+      }
+    }
+
+    if (!success) {
+      console.error('[amazeeai-config] Failed to discover models from any endpoint');
       return;
     }
 
-    const data = await response.json();
-
-    if (!data.data || !Array.isArray(data.data)) {
-      console.error('[amazeeai-config] Invalid response format: expected { data: [...] }');
-      return;
-    }
-
-    if (data.data.length === 0) {
-      console.log('[amazeeai-config] No models returned from API');
-      return;
-    }
-
-    console.log(`[amazeeai-config] Discovered ${data.data.length} models from /v1/model/info:`);
-    for (const m of data.data) {
-      const id = m.model_name || m.model_info?.key || m.litellm_params?.model || '(unknown)';
-      console.log(`[amazeeai-config]   - ${id}`);
-    }
+    console.log(`[amazeeai-config] Discovered ${data.data.length} models (${format} format)`);
 
     const toNumberOr = (value, fallback) => {
       if (typeof value === 'number' && Number.isFinite(value)) {
@@ -403,30 +449,51 @@ async function discoverModels() {
         : 'openai-completions';
     };
 
-    // Transform models to OpenClaw format from /v1/model/info payload
-    const models = data.data.map(m => {
-      const info = m.model_info || {};
-      const modelName = m.model_name || info.key || m.litellm_params?.model || '';
+    let models = [];
+    if (format === 'info') {
+      models = data.data.map(m => {
+        const info = m.model_info || {};
+        const modelName = m.model_name || info.key || m.litellm_params?.model || '';
+        const contextWindow = toNumberOr(info.max_input_tokens, toNumberOr(info.max_tokens, 128000));
+        const maxTokens = toNumberOr(info.max_output_tokens, toNumberOr(info.max_tokens, 4096));
 
-      const contextWindow = toNumberOr(info.max_input_tokens, toNumberOr(info.max_tokens, 128000));
-      const maxTokens = toNumberOr(info.max_output_tokens, toNumberOr(info.max_tokens, 4096));
+        return {
+          id: modelName,
+          name: modelName,
+          api: resolveModelApi(modelName),
+          reasoning: isReasoningModel(modelName, info),
+          input: deriveInputTypes(info),
+          cost: {
+            input: toNumberOr(info.input_cost_per_token, 0),
+            output: toNumberOr(info.output_cost_per_token, 0),
+            cacheRead: toNumberOr(info.cache_read_input_token_cost, 0),
+            cacheWrite: toNumberOr(info.cache_creation_input_token_cost, 0),
+          },
+          contextWindow,
+          maxTokens,
+        };
+      }).filter(m => m.id);
+    } else {
+      models = data.data.map(m => {
+        const modelName = typeof m === 'string' ? m : (m.id || m.name || '');
 
-      return {
-        id: modelName,
-        name: modelName,
-        api: resolveModelApi(modelName),
-        reasoning: isReasoningModel(modelName, info),
-        input: deriveInputTypes(info),
-        cost: {
-          input: toNumberOr(info.input_cost_per_token, 0),
-          output: toNumberOr(info.output_cost_per_token, 0),
-          cacheRead: toNumberOr(info.cache_read_input_token_cost, 0),
-          cacheWrite: toNumberOr(info.cache_creation_input_token_cost, 0),
-        },
-        contextWindow,
-        maxTokens,
-      };
-    }).filter(m => m.id);
+        return {
+          id: modelName,
+          name: modelName,
+          api: resolveModelApi(modelName),
+          reasoning: isReasoningModel(modelName, {}),
+          input: ['text'],
+          cost: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+          contextWindow: 128000,
+          maxTokens: 4096,
+        };
+      }).filter(m => m.id);
+    }
 
     if (models.length === 0) {
       console.log('[amazeeai-config] No valid models after filtering');
@@ -620,6 +687,12 @@ main().catch(err => {
   process.exit(1);
 });
 EOFNODE
+
+refresherScript="/lagoon/amazeeai-model-refresher.js"
+if [ -f "$refresherScript" ] && [ "$AMAZEEAI_DISABLE_BACKGROUND_REFRESH" != "true" ]; then
+  echo "[amazeeai-config] Starting background model refresher daemon..."
+  node "$refresherScript" > /tmp/amazeeai-model-refresher.log 2>&1 &
+fi
 
 configPath="/home/.openclaw/openclaw.json"
 if [ -f "$configPath" ]; then
