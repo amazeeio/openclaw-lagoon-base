@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     nano \
+    vim-tiny \
     openssh-client \
     python3 \
     python3-pip \
@@ -39,14 +40,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN ln -sf /bin/bash /bin/sh
 
-RUN groupadd --gid 10000 openclaw && \
-    useradd --uid 10000 --gid 0 --groups openclaw --home-dir /home --shell /bin/bash --no-create-home openclaw
+RUN if ! getent group openclaw >/dev/null 2>&1; then \
+      groupadd --gid 10000 openclaw; \
+    fi && \
+    if ! getent passwd openclaw >/dev/null 2>&1; then \
+      useradd --uid 10000 --gid 0 --groups openclaw --home-dir /home --shell /bin/bash --no-create-home openclaw; \
+    fi
 
 RUN mkdir -p /lagoon/entrypoints /lagoon/bin /home
 
 COPY .lagoon/fix-permissions /bin/fix-permissions
 COPY .lagoon/entrypoints.sh /lagoon/entrypoints.sh
 COPY .lagoon/bashrc /home/.bashrc
+COPY .lagoon/profile /home/.profile
 COPY .lagoon/amazeeai-bootstrap /lagoon/amazeeai-bootstrap
 COPY .lagoon/amazeeai-skills /lagoon/amazeeai-skills
 COPY .lagoon/polydock_claim.sh /lagoon/polydock_claim.sh
@@ -56,6 +62,7 @@ RUN chmod +x /bin/fix-permissions /lagoon/entrypoints.sh /lagoon/polydock_claim.
     fix-permissions /home
 
 COPY .lagoon/05-ssh-key.sh /lagoon/entrypoints/05-ssh-key.sh
+COPY .lagoon/10-passwd.sh /lagoon/entrypoints/10-passwd.sh
 COPY .lagoon/50-shell-config.sh /lagoon/entrypoints/50-shell-config.sh
 COPY .lagoon/amazeeai-model-refresher.js /lagoon/amazeeai-model-refresher.js
 COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
@@ -68,6 +75,7 @@ ENV NODE_ENV=production \
     HOME=/home \
     OPENCLAW_GATEWAY_PORT=3000 \
     OPENCLAW_NO_RESPAWN=1 \
+    OPENCLAW_NO_AUTO_UPDATE=1 \
     XDG_DATA_HOME=/home/.openclaw/.local/share/ \
     PNPM_HOME=/home/.openclaw/.local/share/pnpm \
     npm_config_cache=/tmp/.npm \
@@ -77,7 +85,8 @@ ENV NODE_ENV=production \
     LAGOON=openclaw \
     TMPDIR=/tmp \
     TMP=/tmp \
-    BASH_ENV=/home/.bashrc
+    BASH_ENV=/home/.bashrc \
+    ENV=/home/.profile
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
     fix-permissions /home/.openclaw
