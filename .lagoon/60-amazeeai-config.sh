@@ -110,6 +110,10 @@ config.tools.exec.security = 'full';
 config.tools.exec.ask = 'off';
 console.log('[amazeeai-config] Enforced autonomous tool execution defaults (profile=full, allow=*, exec.host=gateway, exec.security=full, exec.ask=off)');
 
+config.agents.defaults.sandbox = config.agents.defaults.sandbox || {};
+config.agents.defaults.sandbox.mode = 'off';
+console.log('[amazeeai-config] Disabled sandbox globally to allow unhindered tool execution in containerized environments (sandbox.mode=off)');
+
 // Ensure required base fields from template are present
 // OpenClaw needs these to start properly
 if (!config.agents.defaults.workspace) {
@@ -678,6 +682,14 @@ async function main() {
   configureExtraBootstrapHooks(bootstrapExtraFiles);
   sanitizeModelInputs();
 
+  // Ensure MEMORY.md exists in the workspace
+  const memoryMdPath = path.join(workspaceDir, 'MEMORY.md');
+  if (!fs.existsSync(memoryMdPath)) {
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(memoryMdPath, '# Long-Term Memory\n\nThis file contains durable facts, preferences, and standing decisions.\n');
+    console.log('[amazeeai-config] Generated missing MEMORY.md');
+  }
+
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log('[amazeeai-config] Configuration saved to:', configPath);
 }
@@ -701,6 +713,7 @@ if [ -f "$configPath" ]; then
 
   if [ "$OLD_VER" != "$CURRENT_VER" ]; then
     echo "[amazeeai-config] Configuration version changed ($OLD_VER -> $CURRENT_VER). Running migrations..."
+    openclaw plugins registry --refresh || true
     openclaw doctor --post-upgrade --fix --yes || true
     openclaw doctor --lint || true
   fi

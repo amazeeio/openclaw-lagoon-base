@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
     tags:
       - 'v*'
   workflow_dispatch:
@@ -33,6 +34,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Get release version
+        id: release_version
+        run: |
+          if [ -f RELEASE_VERSION ]; then
+            version="$(tr -d '\n' < RELEASE_VERSION)"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "RELEASE_VERSION file missing; refusing to publish unknown tag" >&2
+            exit 1
+          fi
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -42,6 +54,8 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev-${{ steps.release_version.outputs.version }},enable=${{ github.ref_name == 'dev' }}
+            type=raw,value=${{ steps.release_version.outputs.version }}-dev,enable=${{ github.ref_name == 'dev' }}
           labels: |
             org.opencontainers.image.title=openclaw-lagoon-base
             org.opencontainers.image.description=Base OpenClaw Lagoon runtime image
