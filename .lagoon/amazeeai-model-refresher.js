@@ -14,9 +14,9 @@ if (!baseUrl) {
   process.exit(0);
 }
 
-const intervalMs = parseInt(process.env.AMAZEEAI_REFRESH_INTERVAL_MS, 10) || 10 * 60 * 1000;
+const abortSignal = AbortSignal.timeout(20000);
 
-console.log('[amazeeai-refresher] Starting background model refresher daemon (interval: ' + intervalMs + 'ms)');
+console.log('[amazeeai-refresher] Starting model refresher...');
 
 const toNumberOr = (value, fallback) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -66,7 +66,7 @@ async function fetchModels() {
   let success = false;
 
   try {
-    const response = await fetch(cleanBaseUrl + '/v1/model/info', { headers });
+    const response = await fetch(cleanBaseUrl + '/v1/model/info', { headers, signal: abortSignal });
     if (response.ok) {
       const payload = await response.json();
       if (payload.data && Array.isArray(payload.data)) {
@@ -79,7 +79,7 @@ async function fetchModels() {
 
   if (!success) {
     try {
-      const response = await fetch(cleanBaseUrl + '/v1/models', { headers });
+      const response = await fetch(cleanBaseUrl + '/v1/models', { headers, signal: abortSignal });
       if (response.ok) {
         const payload = await response.json();
         const list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.data) ? payload.data : null);
@@ -94,7 +94,7 @@ async function fetchModels() {
 
   if (!success) {
     try {
-      const response = await fetch(cleanBaseUrl + '/models', { headers });
+      const response = await fetch(cleanBaseUrl + '/models', { headers, signal: abortSignal });
       if (response.ok) {
         const payload = await response.json();
         const list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.data) ? payload.data : null);
@@ -171,14 +171,20 @@ function sanitizeModelInputs(models) {
 async function runRefresh() {
   try {
     const models = await fetchModels();
-    if (!models || models.length === 0) {
-      return;
+    if (!models) {
+      console.error('[amazeeai-refresher] Failed to fetch models from API (received null)');
+      return false;
+    }
+    if (models.length === 0) {
+      console.error('[amazeeai-refresher] API returned an empty models list');
+      return false;
     }
 
     sanitizeModelInputs(models);
 
     if (!fs.existsSync(configPath)) {
-      return;
+      console.error('[amazeeai-refresher] OpenClaw config file not found at: ' + configPath);
+      return false;
     }
 
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -187,7 +193,8 @@ async function runRefresh() {
     const newModelIds = models.map(m => m.id).sort().join(',');
 
     if (existingModelIds === newModelIds) {
-      return;
+      console.log('[amazeeai-refresher] Models are up to date. No config change required.');
+      return true;
     }
 
     console.log('[amazeeai-refresher] Models changed! Refreshing ' + models.length + ' model(s) in openclaw.json');
@@ -230,15 +237,28 @@ async function runRefresh() {
     }
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    console.log('[amazeeai-refresher] Config file updated and saved');
+    console.log('[amazeeai-refresher] Config file updated and saved successfully');
+    return true;
   } catch (error) {
-    console.error('[amazeeai-refresher] Refresh failed:', error.message);
+    console.error('[amazeeai-refresher] Refresh failed with error:', error.message);
+    return false;
   }
 }
 
-const once = process.argv.includes('--once') || process.env.AMAZEEAI_REFRESH_ONCE === 'true';
-runRefresh().then(() => {
-  if (!once) {
-    setInterval(runRefresh, intervalMs);
+const timeoutMs = parseInt(process.env.AMAZEEAI_REFRESH_TIMEOUT_MS, 10) || 30000;
+const timeout = setTimeout(() => {
+  console.error('[amazeeai-refresher] Refresh timed out after ' + timeoutMs + 'ms');
+  process.exit(1);
+}, timeoutMs);
+
+runRefresh().then((success) => {
+  clearTimeout(timeout);
+  if (!success) {
+    process.exit(1);
   }
+  process.exit(0);
+}).catch((error) => {
+  clearTimeout(timeout);
+  console.error('[amazeeai-refresher] Unhandled exception:', error);
+  process.exit(1);
 });

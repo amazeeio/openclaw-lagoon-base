@@ -700,11 +700,6 @@ main().catch(err => {
 });
 EOFNODE
 
-refresherScript="/lagoon/amazeeai-model-refresher.js"
-if [ -f "$refresherScript" ] && [ "$AMAZEEAI_DISABLE_BACKGROUND_REFRESH" != "true" ]; then
-  echo "[amazeeai-config] Starting background model refresher daemon..."
-  node "$refresherScript" > /tmp/amazeeai-model-refresher.log 2>&1 &
-fi
 
 configPath="/home/.openclaw/openclaw.json"
 if [ -f "$configPath" ]; then
