@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     jq \
     procps \
+    sqlite3 \
     $EXTRA_APT_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
