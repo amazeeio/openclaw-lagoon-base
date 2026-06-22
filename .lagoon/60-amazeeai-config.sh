@@ -724,5 +724,8 @@ if [ -f "$configPath" ]; then
   fi
 fi
 
+echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
+openclaw exec-policy preset yolo || true
+
 echo "[amazeeai-config] Configuration complete. Starting OpenClaw gateway..."
 echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no output is normal)."
