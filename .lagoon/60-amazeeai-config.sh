@@ -5,6 +5,16 @@
 
 echo "[amazeeai-config] Configuring OpenClaw..."
 
+# Clear any existing SQLite state database to break RollingUpdate locks on NFS/EFS.
+# Since this database only contains transient/cached plugin registry/state info,
+# deleting it is safe and ensures that rolling deployments don't deadlock.
+STATE_DIR="${OPENCLAW_STATE_DIR:-/home/.openclaw}/state"
+STATE_DB="${STATE_DIR}/openclaw.sqlite"
+if [ -f "$STATE_DB" ]; then
+  echo "[amazeeai-config] Detected existing state database. Clearing locks to prevent RollingUpdate deadlocks..."
+  rm -f "${STATE_DB}" "${STATE_DB}-shm" "${STATE_DB}-wal" || true
+fi
+
 node << 'EOFNODE'
 const fs = require('fs');
 const path = require('path');
