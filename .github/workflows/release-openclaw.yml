@@ -53,8 +53,11 @@ jobs:
             exit 0
           fi
 
-          package_version=$(perl -ne 'print "$1\n" if /^ARG OPENCLAW_VERSION=(.+)$/ ' Dockerfile | head -n 1)
-          release_version=$(tr -d '\n' < RELEASE_VERSION)
+          package_version=$(sed -n 's/^ARG OPENCLAW_VERSION=//p' Dockerfile | head -n 1)
+          release_version=$(sed -n 's/^ARG RELEASE_VERSION=//p' Dockerfile | head -n 1)
+          if [ -z "$release_version" ]; then
+            release_version="$package_version"
+          fi
 
           if [ -z "$package_version" ]; then
             echo "error: could not determine OPENCLAW_VERSION after release" >&2

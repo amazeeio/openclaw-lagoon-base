@@ -6,8 +6,8 @@ usage() {
 Usage: ./scripts/release-openclaw.sh [--push] [--base-revision N] [openclaw-version]
 
 Without a version argument, the script resolves the latest published npm version
-for the openclaw package. The Dockerfile tracks the packaged OpenClaw version,
-while RELEASE_VERSION tracks the published image release version.
+for the openclaw package. The Dockerfile tracks both the packaged OpenClaw version
+(ARG OPENCLAW_VERSION) and the published image release version (ARG RELEASE_VERSION).
 
 When --base-revision is provided, the packaged OpenClaw version stays at the
 specified or current version and the image release version becomes
@@ -74,8 +74,6 @@ if [ ! -f Dockerfile ]; then
   exit 1
 fi
 
-release_version_file="RELEASE_VERSION"
-
 if [ -n "$(git status --porcelain)" ]; then
   echo "error: working tree is not clean; commit or stash existing changes first" >&2
   exit 1
@@ -98,9 +96,8 @@ if ! printf '%s' "$current_version" | grep -Eq '^[0-9]+(\.[0-9]+){2}([.-][0-9A-Z
   exit 1
 fi
 
-if [ -f "$release_version_file" ]; then
-  current_release_version=$(tr -d '\n' < "$release_version_file")
-else
+current_release_version=$(sed -n 's/^ARG RELEASE_VERSION=//p' Dockerfile | head -n 1)
+if [ -z "$current_release_version" ]; then
   current_release_version="$current_version"
 fi
 
@@ -149,9 +146,14 @@ if [ "$target_version" != "$current_version" ]; then
   perl -0pi -e "s/^ARG OPENCLAW_VERSION=\Q$current_version\E\$/ARG OPENCLAW_VERSION=$target_version/m" Dockerfile
 fi
 
-printf '%s\n' "$target_release_version" > "$release_version_file"
+if grep -Eq '^ARG RELEASE_VERSION=' Dockerfile; then
+  perl -0pi -e "s/^ARG RELEASE_VERSION=\Q$current_release_version\E\$/ARG RELEASE_VERSION=$target_release_version/m" Dockerfile
+else
+  # If ARG RELEASE_VERSION doesn't exist, insert it right after ARG OPENCLAW_VERSION
+  perl -0pi -e "s/^(ARG OPENCLAW_VERSION=\Q$target_version\E)\$/\$1\nARG RELEASE_VERSION=$target_release_version/m" Dockerfile
+fi
 
-git add Dockerfile "$release_version_file"
+git add Dockerfile
 
 if [ "$target_version" = "$current_version" ]; then
   commit_message="Release base image $target_release_version"
