@@ -37,11 +37,15 @@ jobs:
       - name: Get release version
         id: release_version
         run: |
-          if [ -f RELEASE_VERSION ]; then
-            version="$(tr -d '\n' < RELEASE_VERSION)"
+          version=$(sed -n 's/^ARG RELEASE_VERSION=//p' Dockerfile | head -n 1)
+          if [ -z "$version" ]; then
+            # Fallback to OPENCLAW_VERSION if RELEASE_VERSION is not found
+            version=$(sed -n 's/^ARG OPENCLAW_VERSION=//p' Dockerfile | head -n 1)
+          fi
+          if [ -n "$version" ]; then
             echo "version=$version" >> "$GITHUB_OUTPUT"
           else
-            echo "RELEASE_VERSION file missing; refusing to publish unknown tag" >&2
+            echo "Could not determine release version from Dockerfile; refusing to publish" >&2
             exit 1
           fi
 

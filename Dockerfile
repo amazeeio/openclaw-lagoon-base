@@ -1,25 +1,18 @@
-# Stage 1: Install OpenClaw (skip native builds for API-based usage)
-FROM node:24-bookworm AS builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
-
 ARG OPENCLAW_VERSION=2026.6.9
-RUN npm install -g --ignore-scripts openclaw@${OPENCLAW_VERSION}
-RUN openclaw --version
+ARG RELEASE_VERSION=2026.6.9
 
-# Stage 2: Runtime image
-FROM node:24-bookworm-slim
+# Stage 1: Get Lagoon commons tools
+# uselagoon/commons:26.5.1
+FROM uselagoon/commons@sha256:e5a1592d38c60f31db28a50974bfc69d785ecf642da62d98322c2edc587edec5 AS commons
 
-RUN npm install -g pnpm
+# Stage 2: Build the runtime image from the official OpenClaw image
+FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}-browser
 
-COPY --from=builder /usr/local/lib/node_modules/openclaw /usr/local/lib/node_modules/openclaw
-# The builder installs OpenClaw with --ignore-scripts, so the packaged
-# bundled-plugin postinstall never runs automatically. Run the upstream repair
-# step here so bundled plugin runtime deps are installed at the package root
-# and compiled dist chunks do not hit the missing-module class from #60004.
-RUN node /usr/local/lib/node_modules/openclaw/scripts/postinstall-bundled-plugins.mjs
-RUN ln -s /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
-RUN openclaw --version
+# Switch to root to perform setup and package installation
+USER root
+
+# Install Lagoon fix-permissions tool from commons
+COPY --from=commons /bin/fix-permissions /bin/fix-permissions
 
 ARG EXTRA_APT_PACKAGES=""
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,8 +42,6 @@ RUN if ! getent group openclaw >/dev/null 2>&1; then \
     fi
 
 RUN mkdir -p /lagoon/entrypoints /lagoon/bin /home
-
-COPY .lagoon/fix-permissions /bin/fix-permissions
 COPY .lagoon/entrypoints.sh /lagoon/entrypoints.sh
 COPY .lagoon/bashrc /home/.bashrc
 COPY .lagoon/profile /home/.profile
