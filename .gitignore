@@ -2,3 +2,7 @@
 .env*
 
 .local*
+
+# Gemini files
+GEMINI.md
+LEARNINGS.gemini.md
