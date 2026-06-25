@@ -680,7 +680,8 @@ function configureChannels() {
     config.channels.slack.botToken = '${SLACK_BOT_TOKEN}';
     config.channels.slack.appToken = '${SLACK_APP_TOKEN}';
     config.channels.slack.enabled = true;
-    console.log('[amazeeai-config] Configured Slack channel');
+    config.channels.slack.groupPolicy = process.env.SLACK_GROUP_POLICY || 'open';
+    console.log('[amazeeai-config] Configured Slack channel (groupPolicy=' + config.channels.slack.groupPolicy + ')');
   }
 }
 
