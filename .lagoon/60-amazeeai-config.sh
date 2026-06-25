@@ -22,6 +22,7 @@ const path = require('path');
 // Config paths - use OPENCLAW_STATE_DIR if set, otherwise default to home directory
 const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(process.env.HOME || '/home', '.openclaw');
 const configPath = path.join(stateDir, 'openclaw.json');
+const approvalsPath = path.join(stateDir, 'exec-approvals.json');
 const workspaceDir = process.env.OPENCLAW_WORKSPACE || '/home/.openclaw/workspace';
 const bundledBootstrapSourceDir = '/lagoon/amazeeai-bootstrap';
 const bundledSkillsSourceDir = '/lagoon/amazeeai-skills';
@@ -123,6 +124,41 @@ console.log('[amazeeai-config] Enforced autonomous tool execution defaults (prof
 config.agents.defaults.sandbox = config.agents.defaults.sandbox || {};
 config.agents.defaults.sandbox.mode = 'off';
 console.log('[amazeeai-config] Disabled sandbox globally to allow unhindered tool execution in containerized environments (sandbox.mode=off)');
+
+// Ensure default exec-approvals.json exists or has the correct defaults
+const defaultApprovals = {
+  version: 1,
+  defaults: {
+    security: 'full',
+    ask: 'off',
+    askFallback: 'full'
+  }
+};
+
+let approvals = {};
+try {
+  if (fs.existsSync(approvalsPath)) {
+    approvals = JSON.parse(fs.readFileSync(approvalsPath, 'utf8'));
+    console.log('[amazeeai-config] Loaded existing exec-approvals.json');
+  } else {
+    approvals = JSON.parse(JSON.stringify(defaultApprovals));
+    console.log('[amazeeai-config] Initializing exec-approvals.json from template');
+  }
+} catch (e) {
+  console.log('[amazeeai-config] Error parsing exec-approvals.json, resetting to default:', e.message);
+  approvals = JSON.parse(JSON.stringify(defaultApprovals));
+}
+
+// Ensure defaults are set
+approvals.version = approvals.version || 1;
+approvals.defaults = approvals.defaults || {};
+approvals.defaults.security = 'full';
+approvals.defaults.ask = 'off';
+approvals.defaults.askFallback = 'full';
+
+fs.writeFileSync(approvalsPath, JSON.stringify(approvals, null, 2));
+console.log('[amazeeai-config] Enforced default exec-approvals.json at:', approvalsPath);
+
 
 // Ensure required base fields from template are present
 // OpenClaw needs these to start properly
