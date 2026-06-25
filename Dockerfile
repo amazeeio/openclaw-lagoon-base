@@ -58,6 +58,7 @@ COPY .lagoon/05-ssh-key.sh /lagoon/entrypoints/05-ssh-key.sh
 COPY .lagoon/10-passwd.sh /lagoon/entrypoints/10-passwd.sh
 COPY .lagoon/50-shell-config.sh /lagoon/entrypoints/50-shell-config.sh
 COPY .lagoon/amazeeai-model-refresher.js /lagoon/amazeeai-model-refresher.js
+COPY .lagoon/openclaw-patch.js /lagoon/openclaw-patch.js
 COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
 COPY .lagoon/ssh_config /etc/ssh/ssh_config
 
@@ -65,6 +66,7 @@ RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
     && fix-claw-permissions /home/.openclaw
 
 ENV NODE_ENV=production \
+    NODE_OPTIONS="--require /lagoon/openclaw-patch.js" \
     HOME=/home \
     OPENCLAW_GATEWAY_PORT=3000 \
     OPENCLAW_NO_RESPAWN=1 \

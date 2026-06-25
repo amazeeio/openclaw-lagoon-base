@@ -5,6 +5,17 @@
 
 echo "[amazeeai-config] Configuring OpenClaw..."
 
+# Clean up duplicate state directories that can split session history in Lagoon environments
+if [ -d "/home/node/.openclaw" ]; then
+  echo "[amazeeai-config] Cleaning up duplicate node state directory..."
+  rm -rf "/home/node/.openclaw" || true
+fi
+
+# Attempt to tighten state directory permissions safely (ignoring filesystem/EPERM limitations on NFS/EFS)
+if [ -d "/home/.openclaw" ]; then
+  chmod 700 /home/.openclaw 2>/dev/null || true
+fi
+
 # Clear any existing SQLite state database to break RollingUpdate locks on NFS/EFS.
 # Since this database only contains transient/cached plugin registry/state info,
 # deleting it is safe and ensures that rolling deployments don't deadlock.
@@ -14,6 +25,7 @@ if [ -f "$STATE_DB" ]; then
   echo "[amazeeai-config] Detected existing state database. Clearing locks to prevent RollingUpdate deadlocks..."
   rm -f "${STATE_DB}" "${STATE_DB}-shm" "${STATE_DB}-wal" || true
 fi
+
 
 node << 'EOFNODE'
 const fs = require('fs');
