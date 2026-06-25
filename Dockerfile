@@ -49,8 +49,9 @@ COPY .lagoon/amazeeai-bootstrap /lagoon/amazeeai-bootstrap
 COPY .lagoon/amazeeai-skills /lagoon/amazeeai-skills
 COPY .lagoon/polydock_claim.sh /lagoon/polydock_claim.sh
 COPY .lagoon/polydock_post_deploy.sh /lagoon/polydock_post_deploy.sh
+COPY .lagoon/fix-claw-permissions /bin/fix-claw-permissions
 
-RUN chmod +x /bin/fix-permissions /lagoon/entrypoints.sh /lagoon/polydock_claim.sh /lagoon/polydock_post_deploy.sh && \
+RUN chmod +x /bin/fix-permissions /bin/fix-claw-permissions /lagoon/entrypoints.sh /lagoon/polydock_claim.sh /lagoon/polydock_post_deploy.sh && \
     fix-permissions /home
 
 COPY .lagoon/05-ssh-key.sh /lagoon/entrypoints/05-ssh-key.sh
@@ -61,7 +62,7 @@ COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
 COPY .lagoon/ssh_config /etc/ssh/ssh_config
 
 RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
-    && fix-permissions /home/.openclaw
+    && fix-claw-permissions /home/.openclaw
 
 ENV NODE_ENV=production \
     HOME=/home \
@@ -81,7 +82,7 @@ ENV NODE_ENV=production \
     ENV=/home/.profile
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
-    fix-permissions /home/.openclaw
+    fix-claw-permissions /home/.openclaw
 
 WORKDIR /home/.openclaw
 EXPOSE 3000

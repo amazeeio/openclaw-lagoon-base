@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fix permissions on the given directory to restrict to u=rwx,go= (700) for OpenClaw
+if [ -z "$1" ]; then
+  echo "Usage: $0 <directory>"
+  exit 1
+fi
+
+find -L "$1" -exec chmod u=rwx,go= {} +
