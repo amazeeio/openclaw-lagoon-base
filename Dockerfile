@@ -1,5 +1,5 @@
 ARG OPENCLAW_VERSION=2026.6.10
-ARG RELEASE_VERSION=2026.6.10_4
+ARG RELEASE_VERSION=2026.6.10_5
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
