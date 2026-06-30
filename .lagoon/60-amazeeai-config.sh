@@ -782,7 +782,7 @@ CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 
 # gateway, so anything slow here delays pod readiness and trips the Kubernetes
 # rollout progress deadline. `openclaw plugins install` runs npm against the NFS
 # state volume (`/home/.openclaw`), which is slow and can stall for minutes. So
-# the install/refresh/migration work is detached to the background: the gateway
+# the plugin install/refresh work is detached to the background: the gateway
 # starts immediately and the pod becomes Ready, while plugins are populated into
 # the persistent volume out-of-band. Newly added channels activate on the next
 # gateway restart (the documented "install then restart" model). Steady-state
@@ -826,16 +826,41 @@ ensure_channel_plugins() {
     echo "[amazeeai-config] All default channel plugins already installed"
   fi
 
-  # Post-upgrade migrations when the OpenClaw core version changed. Recompile
-  # installed plugins against the new core, then let doctor migrate the config.
-  # Kept in the background too so a slow/hanging doctor can never block a rollout.
+  # On a core version change, recompile installed plugins against the new core.
+  # Backgrounded so a slow `plugins update` can never block the rollout.
   if [ "$OLD_VER" != "$CURRENT_VER" ]; then
-    echo "[amazeeai-config] Core version changed ($OLD_VER -> $CURRENT_VER). Running migrations (background)..."
+    echo "[amazeeai-config] Core version changed ($OLD_VER -> $CURRENT_VER). Updating plugins (background)..."
     openclaw plugins update --all || true
-    openclaw doctor --post-upgrade --fix --yes || true
-    openclaw doctor --lint || true
   fi
 }
+
+# ============================================================
+# Repair the persisted config BEFORE the gateway starts (synchronous)
+#
+# The gateway hard-refuses to boot on an invalid openclaw.json and exits, e.g.
+# after an OpenClaw upgrade when the on-disk config uses an older schema:
+#   "Gateway failed to start: Invalid config at /home/.openclaw/openclaw.json.
+#    mcp.servers.<name>.auth: Invalid input (allowed: "oauth")        ... or
+#    channels.slack...: must not have additional properties: "allow" / etc.
+#    Run "openclaw doctor --fix" to repair, then retry."
+# Because the gateway is the container's main process, this crash-loops and the
+# Kubernetes rollout never goes Ready. The repair MUST happen here, before exec,
+# and with the *new* binary -- it cannot be backgrounded (the gateway would die
+# before the repair lands) and it cannot be gated on version detection (configs
+# also drift via live runtime edits, not just upgrades).
+#
+# `doctor` is bounded by `timeout` and forced non-interactive so it can never
+# hang the rollout (see the plugin-index hang noted in LEARNINGS); --post-upgrade
+# applies schema migrations, --fix repairs remaining invalid values. On a healthy
+# current config this is a fast near-no-op.
+# ============================================================
+echo "[amazeeai-config] Repairing/validating config before startup (openclaw doctor --fix)..."
+DOCTOR_CMD="openclaw doctor --post-upgrade --fix --yes --non-interactive"
+if command -v timeout >/dev/null 2>&1; then
+  timeout 240 $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
+else
+  $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
+fi
 
 echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-blocking)..."
 ( ensure_channel_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
