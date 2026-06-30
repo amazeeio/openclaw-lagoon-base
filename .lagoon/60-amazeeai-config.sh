@@ -770,46 +770,75 @@ fi
 CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
 
 # ============================================================
-# Ensure external channel plugins are installed
+# Ensure external channel plugins are installed (BACKGROUND, non-blocking)
+#
 # In current OpenClaw, several chat channels ship as EXTERNAL plugins that must
 # be installed with `openclaw plugins install` before their config takes effect
 # (bundled channels such as Telegram and iMessage need no install). Without this,
 # writing channels.slack into openclaw.json silently does nothing because the
 # plugin code is absent -- this is why Slack disappeared after the core upgrade.
-# Plugins are installed into the persistent /home/.openclaw volume, so this loop
-# is idempotent across deploys: present plugins are skipped, missing ones added.
+#
+# CRITICAL: entrypoints.sh runs this script to completion *before* it execs the
+# gateway, so anything slow here delays pod readiness and trips the Kubernetes
+# rollout progress deadline. `openclaw plugins install` runs npm against the NFS
+# state volume (`/home/.openclaw`), which is slow and can stall for minutes. So
+# the install/refresh/migration work is detached to the background: the gateway
+# starts immediately and the pod becomes Ready, while plugins are populated into
+# the persistent volume out-of-band. Newly added channels activate on the next
+# gateway restart (the documented "install then restart" model). Steady-state
+# deploys (all plugins already present) do zero slow work thanks to the fast
+# filesystem presence check below -- no registry refresh on the hot path.
 #
 # @openclaw/signal is intentionally NOT in the default set: it has no stable npm
 # release matching the core version (only a 0.0.0 placeholder + a pre-release).
 # Add it (or any other plugin) per-environment via OPENCLAW_EXTRA_PLUGINS once a
 # matching release exists, e.g. OPENCLAW_EXTRA_PLUGINS="@openclaw/signal".
 # ============================================================
-DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
-PLUGIN_LIST="$DEFAULT_PLUGINS ${OPENCLAW_EXTRA_PLUGINS:-}"
+ensure_channel_plugins() {
+  DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
+  PLUGIN_LIST="$DEFAULT_PLUGINS ${OPENCLAW_EXTRA_PLUGINS:-}"
+  projects_dir="/home/.openclaw/npm/projects"
 
-echo "[amazeeai-config] Ensuring external channel plugins are installed..."
-openclaw plugins registry --refresh || true
-installed_plugins="$(openclaw plugins list 2>/dev/null || true)"
-for pkg in $PLUGIN_LIST; do
-  [ -n "$pkg" ] || continue
-  plugin_id="${pkg##*/}"   # e.g. "slack" from "@openclaw/slack"
-  if printf '%s\n' "$installed_plugins" | grep -qiw "$plugin_id"; then
-    echo "[amazeeai-config] Plugin $pkg already installed"
+  # Let the freshly-started gateway initialise its state DB first, to minimise
+  # SQLite lock contention on the NFS volume while we touch the plugin registry.
+  sleep 20
+
+  # Fast presence check (no registry refresh): plugins install into
+  # /home/.openclaw/npm/projects/openclaw-<id>-<hash>/.
+  missing=""
+  for pkg in $PLUGIN_LIST; do
+    [ -n "$pkg" ] || continue
+    plugin_id="${pkg##*/}"   # e.g. "slack" from "@openclaw/slack"
+    if ! ls -d "$projects_dir"/openclaw-"$plugin_id"-* >/dev/null 2>&1; then
+      missing="$missing $pkg"
+    fi
+  done
+
+  if [ -n "$missing" ]; then
+    echo "[amazeeai-config] Installing missing channel plugins (background):$missing"
+    openclaw plugins registry --refresh || true
+    for pkg in $missing; do
+      echo "[amazeeai-config] Installing plugin $pkg ..."
+      openclaw plugins install "$pkg" || echo "[amazeeai-config] WARNING: failed to install plugin $pkg (continuing)"
+    done
+    echo "[amazeeai-config] Channel plugin install complete; restart gateway to activate newly added channels."
   else
-    echo "[amazeeai-config] Installing plugin $pkg ..."
-    openclaw plugins install "$pkg" || echo "[amazeeai-config] WARNING: failed to install plugin $pkg (continuing)"
+    echo "[amazeeai-config] All default channel plugins already installed"
   fi
-done
 
-# Post-upgrade migrations when the OpenClaw core version changed. Run after the
-# install loop so plugins are present, then update them to recompile against the
-# new core before doctor validates the config.
-if [ "$OLD_VER" != "$CURRENT_VER" ]; then
-  echo "[amazeeai-config] Configuration version changed ($OLD_VER -> $CURRENT_VER). Running migrations..."
-  openclaw plugins update --all || true
-  openclaw doctor --post-upgrade --fix --yes || true
-  openclaw doctor --lint || true
-fi
+  # Post-upgrade migrations when the OpenClaw core version changed. Recompile
+  # installed plugins against the new core, then let doctor migrate the config.
+  # Kept in the background too so a slow/hanging doctor can never block a rollout.
+  if [ "$OLD_VER" != "$CURRENT_VER" ]; then
+    echo "[amazeeai-config] Core version changed ($OLD_VER -> $CURRENT_VER). Running migrations (background)..."
+    openclaw plugins update --all || true
+    openclaw doctor --post-upgrade --fix --yes || true
+    openclaw doctor --lint || true
+  fi
+}
+
+echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-blocking)..."
+( ensure_channel_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
 
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
 openclaw exec-policy preset yolo || true
