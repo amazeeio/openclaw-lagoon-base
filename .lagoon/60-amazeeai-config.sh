@@ -835,7 +835,7 @@ ensure_channel_plugins() {
 }
 
 # ============================================================
-# Repair the persisted config BEFORE the gateway starts (synchronous)
+# Repair the persisted config BEFORE the gateway starts (synchronous, on upgrade)
 #
 # The gateway hard-refuses to boot on an invalid openclaw.json and exits, e.g.
 # after an OpenClaw upgrade when the on-disk config uses an older schema:
@@ -845,21 +845,32 @@ ensure_channel_plugins() {
 #    Run "openclaw doctor --fix" to repair, then retry."
 # Because the gateway is the container's main process, this crash-loops and the
 # Kubernetes rollout never goes Ready. The repair MUST happen here, before exec,
-# and with the *new* binary -- it cannot be backgrounded (the gateway would die
-# before the repair lands) and it cannot be gated on version detection (configs
-# also drift via live runtime edits, not just upgrades).
+# with the *new* binary -- it cannot be backgrounded (the gateway would die
+# before the repair lands).
 #
-# `doctor` is bounded by `timeout` and forced non-interactive so it can never
-# hang the rollout (see the plugin-index hang noted in LEARNINGS); --post-upgrade
-# applies schema migrations, --fix repairs remaining invalid values. On a healthy
-# current config this is a fast near-no-op.
+# CRITICAL ORDERING: the state DB (which holds the plugin index) is deleted near
+# the top of this script to break NFS RollingUpdate locks, so `doctor
+# --post-upgrade` would otherwise abort with `plugin.index_unavailable` *before*
+# repairing anything. We must `plugins registry --refresh` first to rebuild the
+# index (see LEARNINGS 2026-06-18), then run doctor.
+#
+# Gated on a version change: only upgrade deploys carry old-schema config that
+# needs migrating, and the index rebuild is ~50s -- no reason to pay it (or risk
+# it) on steady-state same-version deploys, where the gateway rebuilds its own
+# index and boots fine. Both commands are bounded by `timeout` and forced
+# non-interactive so neither can ever hang the rollout.
 # ============================================================
-echo "[amazeeai-config] Repairing/validating config before startup (openclaw doctor --fix)..."
-DOCTOR_CMD="openclaw doctor --post-upgrade --fix --yes --non-interactive"
-if command -v timeout >/dev/null 2>&1; then
-  timeout 240 $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
-else
-  $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
+if [ "$OLD_VER" != "$CURRENT_VER" ]; then
+  echo "[amazeeai-config] Version changed ($OLD_VER -> $CURRENT_VER). Rebuilding plugin index and repairing config before startup..."
+  REFRESH_CMD="openclaw plugins registry --refresh"
+  DOCTOR_CMD="openclaw doctor --post-upgrade --fix --yes --non-interactive"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 150 $REFRESH_CMD || echo "[amazeeai-config] WARNING: plugin registry refresh incomplete (continuing)"
+    timeout 180 $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
+  else
+    $REFRESH_CMD || echo "[amazeeai-config] WARNING: plugin registry refresh incomplete (continuing)"
+    $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
+  fi
 fi
 
 echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-blocking)..."
