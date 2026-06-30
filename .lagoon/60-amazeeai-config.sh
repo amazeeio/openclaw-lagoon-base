@@ -761,16 +761,54 @@ EOFNODE
 
 
 configPath="/home/.openclaw/openclaw.json"
+
+# Detect OpenClaw core version change (drives post-upgrade migrations below)
+OLD_VER="0"
 if [ -f "$configPath" ]; then
   OLD_VER=$(jq -r '.meta.lastTouchedVersion // "0"' "$configPath" 2>/dev/null || echo "0")
-  CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
+fi
+CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
 
-  if [ "$OLD_VER" != "$CURRENT_VER" ]; then
-    echo "[amazeeai-config] Configuration version changed ($OLD_VER -> $CURRENT_VER). Running migrations..."
-    openclaw plugins registry --refresh || true
-    openclaw doctor --post-upgrade --fix --yes || true
-    openclaw doctor --lint || true
+# ============================================================
+# Ensure external channel plugins are installed
+# In current OpenClaw, several chat channels ship as EXTERNAL plugins that must
+# be installed with `openclaw plugins install` before their config takes effect
+# (bundled channels such as Telegram and iMessage need no install). Without this,
+# writing channels.slack into openclaw.json silently does nothing because the
+# plugin code is absent -- this is why Slack disappeared after the core upgrade.
+# Plugins are installed into the persistent /home/.openclaw volume, so this loop
+# is idempotent across deploys: present plugins are skipped, missing ones added.
+#
+# @openclaw/signal is intentionally NOT in the default set: it has no stable npm
+# release matching the core version (only a 0.0.0 placeholder + a pre-release).
+# Add it (or any other plugin) per-environment via OPENCLAW_EXTRA_PLUGINS once a
+# matching release exists, e.g. OPENCLAW_EXTRA_PLUGINS="@openclaw/signal".
+# ============================================================
+DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
+PLUGIN_LIST="$DEFAULT_PLUGINS ${OPENCLAW_EXTRA_PLUGINS:-}"
+
+echo "[amazeeai-config] Ensuring external channel plugins are installed..."
+openclaw plugins registry --refresh || true
+installed_plugins="$(openclaw plugins list 2>/dev/null || true)"
+for pkg in $PLUGIN_LIST; do
+  [ -n "$pkg" ] || continue
+  plugin_id="${pkg##*/}"   # e.g. "slack" from "@openclaw/slack"
+  if printf '%s\n' "$installed_plugins" | grep -qiw "$plugin_id"; then
+    echo "[amazeeai-config] Plugin $pkg already installed"
+  else
+    echo "[amazeeai-config] Installing plugin $pkg ..."
+    openclaw plugins install "$pkg" || echo "[amazeeai-config] WARNING: failed to install plugin $pkg (continuing)"
   fi
+done
+
+# Post-upgrade migrations when the OpenClaw core version changed. Run after the
+# install loop so plugins are present, then update them to recompile against the
+# new core before doctor validates the config.
+if [ "$OLD_VER" != "$CURRENT_VER" ]; then
+  echo "[amazeeai-config] Configuration version changed ($OLD_VER -> $CURRENT_VER). Running migrations..."
+  openclaw plugins update --all || true
+  openclaw doctor --post-upgrade --fix --yes || true
+  openclaw doctor --lint || true
 fi
 
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."

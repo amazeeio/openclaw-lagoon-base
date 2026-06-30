@@ -77,4 +77,10 @@ if (origFspChmod) {
   };
 }
 
-console.log('[openclaw-patch] Global fs.chmod monkeypatch loaded successfully.');
+// Never write to stdout: NODE_OPTIONS=--require runs this on every node
+// invocation, so a stdout line leaks into command output (e.g. the gateway
+// token read in 50-shell-config.sh, which only redirects stderr). Log to
+// stderr, and only when explicitly debugging.
+if (process.env.OPENCLAW_PATCH_DEBUG) {
+  console.error('[openclaw-patch] Global fs.chmod monkeypatch loaded successfully.');
+}
