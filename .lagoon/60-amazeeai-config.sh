@@ -730,6 +730,54 @@ function sanitizeModelInputs() {
   }
 }
 
+// Migrate legacy config shapes that newer OpenClaw schemas reject so the
+// gateway can boot. The gateway hard-refuses to start on an invalid config and
+// `openclaw doctor --fix` will NOT auto-migrate these (it bails on the hard
+// validation errors), so we normalise them here, in place, before writing.
+// Idempotent: each rule only rewrites the known legacy shape.
+//   - mcp.servers[].auth {type:"oauth"} -> "oauth"  (auth is a string now)
+//   - mcp.servers[].type "http"/"sse" (legacy CLI alias) -> canonical transport
+//     ("streamable-http"/"sse"); see docs.openclaw.ai/gateway/configuration-reference
+//   - channels.slack.streaming "partial" (string) -> { mode: "partial" }
+//   - channels.slack.nativeStreaming: true -> folded into streaming.nativeTransport
+//   - channels.slack.channels.<id>.allow -> enabled
+function migrateLegacyConfig() {
+  let changed = 0;
+  const servers = config.mcp && config.mcp.servers;
+  if (servers && typeof servers === 'object') {
+    for (const s of Object.values(servers)) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.auth && typeof s.auth === 'object' && typeof s.auth.type === 'string') {
+        s.auth = s.auth.type; changed++;
+      }
+      if (s.transport == null && typeof s.type === 'string') {
+        if (s.type === 'http') { s.transport = 'streamable-http'; changed++; }
+        else if (s.type === 'sse') { s.transport = 'sse'; changed++; }
+      }
+      if (s.transport != null && 'type' in s) { delete s.type; changed++; }
+    }
+  }
+  const slack = config.channels && config.channels.slack;
+  if (slack && typeof slack === 'object') {
+    let streaming = null;
+    if (typeof slack.streaming === 'string') streaming = { mode: slack.streaming };
+    else if (slack.streaming && typeof slack.streaming === 'object') streaming = slack.streaming;
+    if (slack.nativeStreaming === true) streaming = Object.assign(streaming || {}, { nativeTransport: true });
+    if (streaming && slack.streaming !== streaming) { slack.streaming = streaming; changed++; }
+    if ('nativeStreaming' in slack) { delete slack.nativeStreaming; changed++; }
+    if (slack.channels && typeof slack.channels === 'object') {
+      for (const ch of Object.values(slack.channels)) {
+        if (ch && typeof ch === 'object' && ch.allow != null) {
+          ch.enabled = ch.allow; delete ch.allow; changed++;
+        }
+      }
+    }
+  }
+  if (changed > 0) {
+    console.log(`[amazeeai-config] Migrated ${changed} legacy config field(s) to the current schema`);
+  }
+}
+
 async function main() {
   const bundledWorkspacePaths = ensureBundledBootstrapFiles();
   ensureBundledSkillFiles();
@@ -740,6 +788,7 @@ async function main() {
   configureChannels();
   configureExtraBootstrapHooks(bootstrapExtraFiles);
   sanitizeModelInputs();
+  migrateLegacyConfig();
 
   // Ensure MEMORY.md exists in the workspace
   const memoryMdPath = path.join(workspaceDir, 'MEMORY.md');
@@ -834,44 +883,13 @@ ensure_channel_plugins() {
   fi
 }
 
-# ============================================================
-# Repair the persisted config BEFORE the gateway starts (synchronous, on upgrade)
-#
-# The gateway hard-refuses to boot on an invalid openclaw.json and exits, e.g.
-# after an OpenClaw upgrade when the on-disk config uses an older schema:
-#   "Gateway failed to start: Invalid config at /home/.openclaw/openclaw.json.
-#    mcp.servers.<name>.auth: Invalid input (allowed: "oauth")        ... or
-#    channels.slack...: must not have additional properties: "allow" / etc.
-#    Run "openclaw doctor --fix" to repair, then retry."
-# Because the gateway is the container's main process, this crash-loops and the
-# Kubernetes rollout never goes Ready. The repair MUST happen here, before exec,
-# with the *new* binary -- it cannot be backgrounded (the gateway would die
-# before the repair lands).
-#
-# CRITICAL ORDERING: the state DB (which holds the plugin index) is deleted near
-# the top of this script to break NFS RollingUpdate locks, so `doctor
-# --post-upgrade` would otherwise abort with `plugin.index_unavailable` *before*
-# repairing anything. We must `plugins registry --refresh` first to rebuild the
-# index (see LEARNINGS 2026-06-18), then run doctor.
-#
-# Gated on a version change: only upgrade deploys carry old-schema config that
-# needs migrating, and the index rebuild is ~50s -- no reason to pay it (or risk
-# it) on steady-state same-version deploys, where the gateway rebuilds its own
-# index and boots fine. Both commands are bounded by `timeout` and forced
-# non-interactive so neither can ever hang the rollout.
-# ============================================================
-if [ "$OLD_VER" != "$CURRENT_VER" ]; then
-  echo "[amazeeai-config] Version changed ($OLD_VER -> $CURRENT_VER). Rebuilding plugin index and repairing config before startup..."
-  REFRESH_CMD="openclaw plugins registry --refresh"
-  DOCTOR_CMD="openclaw doctor --post-upgrade --fix --yes --non-interactive"
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 150 $REFRESH_CMD || echo "[amazeeai-config] WARNING: plugin registry refresh incomplete (continuing)"
-    timeout 180 $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
-  else
-    $REFRESH_CMD || echo "[amazeeai-config] WARNING: plugin registry refresh incomplete (continuing)"
-    $DOCTOR_CMD || echo "[amazeeai-config] WARNING: doctor did not complete cleanly (continuing)"
-  fi
-fi
+# NOTE: invalid-config repair is handled inside the node block above by
+# migrateLegacyConfig(), which rewrites legacy shapes (mcp auth/transport, slack
+# streaming/channels) the gateway would otherwise reject at boot. We deliberately
+# do NOT run `openclaw doctor --fix` here: it refuses to auto-migrate those hard
+# validation errors, and `--post-upgrade` needs the plugin index that the state-DB
+# wipe above removes (chicken-and-egg). The JS migration is self-sufficient and
+# leaves a config the gateway accepts directly.
 
 echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-blocking)..."
 ( ensure_channel_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
