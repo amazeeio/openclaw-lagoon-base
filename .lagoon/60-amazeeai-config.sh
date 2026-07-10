@@ -16,14 +16,15 @@ if [ -d "/home/.openclaw" ]; then
   chmod 700 /home/.openclaw 2>/dev/null || true
 fi
 
-# Clear any existing SQLite state database to break RollingUpdate locks on NFS/EFS.
-# Since this database only contains transient/cached plugin registry/state info,
-# deleting it is safe and ensures that rolling deployments don't deadlock.
+# Clear stale SQLite WAL/SHM lock sidecars left by a previous pod on NFS/EFS
+# so RollingUpdate deployments don't deadlock. Never delete the DB itself: it
+# is OpenClaw's canonical runtime store (cron jobs, device pairings, exec
+# approvals, plugin state), not a transient cache.
 STATE_DIR="${OPENCLAW_STATE_DIR:-/home/.openclaw}/state"
 STATE_DB="${STATE_DIR}/openclaw.sqlite"
-if [ -f "$STATE_DB" ]; then
-  echo "[amazeeai-config] Detected existing state database. Clearing locks to prevent RollingUpdate deadlocks..."
-  rm -f "${STATE_DB}" "${STATE_DB}-shm" "${STATE_DB}-wal" || true
+if [ -f "${STATE_DB}-shm" ] || [ -f "${STATE_DB}-wal" ]; then
+  echo "[amazeeai-config] Clearing stale SQLite WAL/SHM lock files to prevent RollingUpdate deadlocks..."
+  rm -f "${STATE_DB}-shm" "${STATE_DB}-wal" || true
 fi
 
 
