@@ -342,6 +342,17 @@ if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
   console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
 }
 
+// The gateway only ever sees traffic via Lagoon's in-cluster router, so trust
+// the private pod/service networks for x-forwarded-for. Without this the gateway
+// treats every request as coming from an untrusted address and cannot detect
+// the real client ("Proxy headers detected from untrusted address" warning).
+// ponytail: RFC1918 ranges cover any in-cluster proxy; narrow to the router IP
+// if a tighter allowlist is ever needed.
+if (!Array.isArray(config.gateway.trustedProxies) || config.gateway.trustedProxies.length === 0) {
+  config.gateway.trustedProxies = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+  console.log('[amazeeai-config] Set gateway.trustedProxies default for the in-cluster Lagoon proxy');
+}
+
 if (config.update.checkOnStart !== false) {
   config.update.checkOnStart = false;
   console.log('[amazeeai-config] Forced update.checkOnStart to Lagoon default: false');
@@ -820,68 +831,80 @@ fi
 CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
 
 # ============================================================
-# Ensure external channel plugins are installed (BACKGROUND, non-blocking)
+# Ensure external channel plugins are present on the state volume (BACKGROUND)
 #
-# In current OpenClaw, several chat channels ship as EXTERNAL plugins that must
-# be installed with `openclaw plugins install` before their config takes effect
-# (bundled channels such as Telegram and iMessage need no install). Without this,
-# writing channels.slack into openclaw.json silently does nothing because the
-# plugin code is absent -- this is why Slack disappeared after the core upgrade.
+# In current OpenClaw, several chat channels ship as EXTERNAL plugins whose code
+# must live under /home/.openclaw/npm/projects before their config takes effect
+# (bundled channels such as Telegram and iMessage need no install). Without the
+# plugin code present, writing channels.slack into openclaw.json silently does
+# nothing -- this is why Slack disappeared after the core upgrade.
+#
+# The DEFAULT set is baked into the image at build time (see Dockerfile
+# OPENCLAW_SEED_DIR) and copied onto the volume here -- a plain local->NFS file
+# copy, NOT `openclaw plugins install`. The npm install path runs npm/network/
+# builds against the slow NFS volume and is what stalled the Kubernetes rollout
+# progress deadline; a copy avoids all of that. The gateway rebuilds its plugin
+# install records from a filesystem scan at startup, so copied-in projects are
+# discovered on the next gateway start with no `plugins install`/`registry
+# --refresh` needed (the documented "restart to activate" model).
 #
 # CRITICAL: entrypoints.sh runs this script to completion *before* it execs the
-# gateway, so anything slow here delays pod readiness and trips the Kubernetes
-# rollout progress deadline. `openclaw plugins install` runs npm against the NFS
-# state volume (`/home/.openclaw`), which is slow and can stall for minutes. So
-# the plugin install/refresh work is detached to the background: the gateway
-# starts immediately and the pod becomes Ready, while plugins are populated into
-# the persistent volume out-of-band. Newly added channels activate on the next
-# gateway restart (the documented "install then restart" model). Steady-state
-# deploys (all plugins already present) do zero slow work thanks to the fast
-# filesystem presence check below -- no registry refresh on the hot path.
+# gateway, so this work is detached to the background: the gateway starts
+# immediately and the pod becomes Ready, while plugins are populated out-of-band.
+# Newly seeded channels activate on the next gateway restart.
 #
-# @openclaw/signal is intentionally NOT in the default set: it has no stable npm
-# release matching the core version (only a 0.0.0 placeholder + a pre-release).
-# Add it (or any other plugin) per-environment via OPENCLAW_EXTRA_PLUGINS once a
-# matching release exists, e.g. OPENCLAW_EXTRA_PLUGINS="@openclaw/signal".
+# Extras not baked into the image are installed via npm from OPENCLAW_EXTRA_PLUGINS,
+# e.g. OPENCLAW_EXTRA_PLUGINS="@openclaw/signal" (kept out of the default set: no
+# stable npm release matching the core version yet).
 # ============================================================
 ensure_channel_plugins() {
-  DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
-  PLUGIN_LIST="$DEFAULT_PLUGINS ${OPENCLAW_EXTRA_PLUGINS:-}"
   projects_dir="/home/.openclaw/npm/projects"
+  seed_projects="${OPENCLAW_SEED_DIR:-/lagoon/seed-openclaw}/npm/projects"
 
   # Let the freshly-started gateway initialise its state DB first, to minimise
-  # SQLite lock contention on the NFS volume while we touch the plugin registry.
+  # SQLite lock contention on the NFS volume while we touch the plugin projects.
   sleep 20
 
-  # Fast presence check (no registry refresh): plugins install into
-  # /home/.openclaw/npm/projects/openclaw-<id>-<hash>/.
-  missing=""
-  for pkg in $PLUGIN_LIST; do
-    [ -n "$pkg" ] || continue
-    plugin_id="${pkg##*/}"   # e.g. "slack" from "@openclaw/slack"
-    if ! ls -d "$projects_dir"/openclaw-"$plugin_id"-* >/dev/null 2>&1; then
-      missing="$missing $pkg"
-    fi
-  done
+  # Copy the image-baked default plugins onto the volume. `cp -RP` recurses but
+  # never dereferences symlinks, so the openclaw -> /app peer symlink is copied as
+  # a symlink (needed so the plugin resolves the core) rather than following it and
+  # duplicating /app. It also does not try to preserve root ownership as the
+  # openclaw user. Seed and volume project dir names are the same deterministic
+  # hash, so a per-dir copy lands exactly where the gateway looks. Re-copy on a
+  # core version change so the plugins match the new core; otherwise only fill in
+  # what's missing.
+  if [ -d "$seed_projects" ]; then
+    mkdir -p "$projects_dir"
+    for src in "$seed_projects"/*/; do
+      [ -d "$src" ] || continue
+      name=$(basename "$src")
+      dest="$projects_dir/$name"
+      if [ ! -d "$dest" ] || [ "$OLD_VER" != "$CURRENT_VER" ]; then
+        echo "[amazeeai-config] Seeding plugin project $name from image (core $OLD_VER -> $CURRENT_VER)"
+        rm -rf "$dest"
+        cp -RP "$src" "$dest"
+      fi
+    done
+    echo "[amazeeai-config] Default channel plugins seeded from image"
+  else
+    echo "[amazeeai-config] WARNING: no baked plugin seed at $seed_projects; skipping default plugin seeding"
+  fi
 
-  if [ -n "$missing" ]; then
-    echo "[amazeeai-config] Installing missing channel plugins (background):$missing"
-    openclaw plugins registry --refresh || true
-    for pkg in $missing; do
-      echo "[amazeeai-config] Installing plugin $pkg ..."
+  # Extras are not baked into the image: install any configured-but-missing ones
+  # via npm (rare; accepts the npm cost since it is opt-in per environment).
+  if [ -n "${OPENCLAW_EXTRA_PLUGINS:-}" ]; then
+    refreshed=""
+    for pkg in $OPENCLAW_EXTRA_PLUGINS; do
+      [ -n "$pkg" ] || continue
+      plugin_id="${pkg##*/}"   # e.g. "signal" from "@openclaw/signal"
+      ls -d "$projects_dir"/openclaw-"$plugin_id"-* >/dev/null 2>&1 && continue
+      [ -n "$refreshed" ] || { openclaw plugins registry --refresh || true; refreshed=1; }
+      echo "[amazeeai-config] Installing extra plugin $pkg ..."
       openclaw plugins install "$pkg" || echo "[amazeeai-config] WARNING: failed to install plugin $pkg (continuing)"
     done
-    echo "[amazeeai-config] Channel plugin install complete; restart gateway to activate newly added channels."
-  else
-    echo "[amazeeai-config] All default channel plugins already installed"
   fi
 
-  # On a core version change, recompile installed plugins against the new core.
-  # Backgrounded so a slow `plugins update` can never block the rollout.
-  if [ "$OLD_VER" != "$CURRENT_VER" ]; then
-    echo "[amazeeai-config] Core version changed ($OLD_VER -> $CURRENT_VER). Updating plugins (background)..."
-    openclaw plugins update --all || true
-  fi
+  echo "[amazeeai-config] Channel plugin maintenance complete; restart gateway to activate newly added channels."
 }
 
 # NOTE: invalid-config repair is handled inside the node block above by

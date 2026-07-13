@@ -83,6 +83,23 @@ ENV NODE_ENV=production \
     BASH_ENV=/home/.bashrc \
     ENV=/home/.profile
 
+# Pre-install the default channel plugins at build time into an image-baked seed
+# dir that lives OUTSIDE the runtime state volume (/home/.openclaw is a mounted
+# persistent volume at runtime, so anything installed there during build is
+# hidden). The entrypoint copies this seed onto the volume on boot, so instances
+# get channel plugins without running `openclaw plugins install` (npm over the NFS
+# volume) at runtime -- that install storm is what stalled rollouts. Plugin
+# project dir names are a deterministic hash of the package name, so the seeded
+# paths match exactly what the gateway looks for. We keep only the npm/ tree (the
+# gateway rebuilds install records from a filesystem scan at startup) and drop the
+# build-time state/config so no stale config is seeded.
+ENV OPENCLAW_SEED_DIR=/lagoon/seed-openclaw
+ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
+RUN OPENCLAW_STATE_DIR="$OPENCLAW_SEED_DIR" HOME="$OPENCLAW_SEED_DIR" \
+      openclaw plugins install $DEFAULT_PLUGINS \
+    && rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json \
+    && chmod -R a+rX "$OPENCLAW_SEED_DIR/npm"
+
 RUN chown -R openclaw:openclaw /home/.openclaw && \
     fix-claw-permissions /home/.openclaw
 
