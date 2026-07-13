@@ -95,10 +95,20 @@ ENV NODE_ENV=production \
 # build-time state/config so no stale config is seeded.
 ENV OPENCLAW_SEED_DIR=/lagoon/seed-openclaw
 ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
-RUN OPENCLAW_STATE_DIR="$OPENCLAW_SEED_DIR" HOME="$OPENCLAW_SEED_DIR" \
-      openclaw plugins install $DEFAULT_PLUGINS \
-    && rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json \
-    && chmod -R a+rX "$OPENCLAW_SEED_DIR/npm"
+# `openclaw plugins install` takes ONE package per invocation, so loop. Refresh
+# the registry first so version resolution against the fresh seed state dir works.
+# set -e makes any plugin install failure fail the build, so a shipped image
+# always has the complete default plugin set (no silent partial seed).
+RUN set -eu; \
+    export OPENCLAW_STATE_DIR="$OPENCLAW_SEED_DIR" HOME="$OPENCLAW_SEED_DIR"; \
+    mkdir -p "$OPENCLAW_SEED_DIR"; \
+    openclaw plugins registry --refresh || true; \
+    for pkg in $DEFAULT_PLUGINS; do \
+      echo "[seed] installing $pkg"; \
+      openclaw plugins install "$pkg"; \
+    done; \
+    rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json; \
+    chmod -R a+rX "$OPENCLAW_SEED_DIR/npm"
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
     fix-claw-permissions /home/.openclaw
