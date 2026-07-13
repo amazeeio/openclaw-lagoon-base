@@ -149,3 +149,45 @@ That means bundled OpenClaw customizations should be added there using the final
 OpenClaw documents `AGENTS.md`, `SOUL.md`, and `TOOLS.md` as injected prompt files, while shared managed skills live separately under `~/.openclaw/skills/<skill>/SKILL.md`.
 
 This repository bundles the amazee AGENTS file and managed shared skills. Bootstrap prompt files and skills are copied by separate functions so `bootstrap-extra-files` only tracks injected prompt files such as `AGENTS.md`, `SOUL.md`, and `TOOLS.md`.
+
+## Managed default config
+
+`openclaw.json` lives on the persistent volume (`/home/.openclaw`) and is **kept, not recreated**, across deploys. On each boot `.lagoon/60-amazeeai-config.sh` loads the existing file, applies our defaults, and writes it back. Keys fall into three tiers:
+
+- **Platform policy (always enforced):** `tools.*`, `agents.defaults.sandbox`, `update.checkOnStart`, `gateway.trustedProxies`, and the platform `gateway.controlUi.allowedOrigins` entries (these are *unioned* with any origins a user added, so user origins survive).
+- **Seeded defaults (fill-if-absent):** applied by `deepFillDefaults()` — set only when missing, so user edits always win and survive redeploys. New minimal defaults added to this repo reach existing instances additively. To *change* a value fleet-wide (not just add one), add a one-off rule to `migrateLegacyConfig()`.
+- **User-owned (never touched):** everything else, including all webhook routes.
+
+## Webhooks
+
+The bundled OpenClaw `webhooks` plugin is **enabled by default** (`plugins.entries.webhooks.enabled = true`); enabling it with no routes is a no-op. Users add their own routes per instance — no redeploy needed. Set `plugins.entries.webhooks.enabled = false` to opt out; that choice is preserved.
+
+A route exposes `POST /plugins/webhooks/<routeId>` (reachable at `https://<your-instance>/plugins/webhooks/<routeId>`) and drives an OpenClaw TaskFlow session. It is guarded **only** by a per-route secret (the gateway does not add auth in front of this path), so use a strong, unique secret and treat it as high-value — a caller with the secret can start agent runs.
+
+Add a route by editing `plugins.entries.webhooks.config.routes` (via the Control UI, or by editing `openclaw.json` over `lagoon ssh`):
+
+```json5
+{
+  plugins: { entries: { webhooks: {
+    enabled: true,
+    config: { routes: {
+      zapier: {
+        sessionKey: "agent:main:main",
+        // Simplest option (works fully in the UI): an inline secret string.
+        secret: "<a-long-random-secret>"
+      }
+    } } }
+  } } }
+}
+```
+
+Restart the gateway to activate a newly added route.
+
+**Secret options:**
+- **Inline string (recommended default):** `secret: "<random>"`. Fully editable in the Control UI, no file or env access needed. Stored in `openclaw.json` on the private volume.
+- **File-based** (for those with SSH / file-upload access): `secret: { source: "file", provider: "default", id: "/home/.openclaw/secrets/zapier" }`, then write the secret to that file. Keeps the secret out of `openclaw.json`.
+- **Env-based** (`source: "env"`) is also supported but requires setting a Lagoon env var and redeploying, so it is not self-service.
+
+Callers present the secret as `Authorization: Bearer <secret>` or the `x-openclaw-webhook-secret` header. Requests are `POST` + `application/json` using OpenClaw's webhook action protocol — see https://docs.openclaw.ai/plugins/webhooks.
+
+The webhook path is intentionally left publicly reachable so external services can call it; the per-route secret is the guard. If a tenant wants to additionally restrict it to known source IPs, that is an ingress-level change requested per environment, not a default.

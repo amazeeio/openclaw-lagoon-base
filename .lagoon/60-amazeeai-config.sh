@@ -328,6 +328,52 @@ if (!config.agents.defaults.memorySearch.query?.hybrid) {
   console.log('[amazeeai-config] Existing memory search hybrid query config detected; leaving unchanged');
 }
 
+// Deep-merge default values into config WITHOUT overwriting anything a user (via
+// the Control UI / SSH) or a prior run already set. Objects recurse; any existing
+// leaf or array is left untouched. This lets us ship new minimal defaults from
+// this repo that reach existing instances additively while preserving user edits.
+// It cannot CHANGE a value a user already has -- do that with a one-off rule in
+// migrateLegacyConfig() when a fleet-wide value change is genuinely needed.
+function deepFillDefaults(target, defaults) {
+  for (const key of Object.keys(defaults)) {
+    const defVal = defaults[key];
+    const isPlainObject = defVal && typeof defVal === 'object' && !Array.isArray(defVal);
+    if (isPlainObject) {
+      if (target[key] === undefined) {
+        target[key] = {};
+      }
+      // Only recurse when the user hasn't replaced this with a non-object; if they
+      // have, respect their edit and leave it alone.
+      if (target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+        deepFillDefaults(target[key], defVal);
+      }
+    } else if (target[key] === undefined) {
+      target[key] = defVal;
+    }
+  }
+  return target;
+}
+
+// Minimal platform defaults seeded into every instance (fill-if-absent only, so
+// user edits always win and survive redeploys). Add future minimal defaults here.
+const seededDefaults = {
+  plugins: {
+    entries: {
+      // The bundled `webhooks` plugin ships in the OpenClaw image; enable it so
+      // users only need to add a route to start receiving webhooks -- via the
+      // Control UI, or by editing plugins.entries.webhooks.config.routes. Enabling
+      // with no routes is a safe no-op. A user who sets enabled:false to opt out
+      // keeps that choice (fill-if-absent never overwrites it).
+      webhooks: {
+        enabled: true,
+        config: { routes: {} },
+      },
+    },
+  },
+};
+deepFillDefaults(config, seededDefaults);
+console.log('[amazeeai-config] Applied minimal platform defaults (webhooks plugin enabled by default)');
+
 if (!config.gateway.port) {
   config.gateway.port = gatewayPort;
 }
@@ -388,9 +434,15 @@ const fixedAllowedOrigins = [
 ];
 
 const lagoonRouteOrigins = parseLagoonRoutes(process.env.LAGOON_ROUTES || '');
+// Union (not replace) so the platform origins are always guaranteed while any
+// origin a user added via the Control UI survives redeploys.
+const existingAllowedOrigins = Array.isArray(config.gateway.controlUi.allowedOrigins)
+  ? config.gateway.controlUi.allowedOrigins
+  : [];
 config.gateway.controlUi.allowedOrigins = Array.from(new Set([
   ...fixedAllowedOrigins,
   ...lagoonRouteOrigins,
+  ...existingAllowedOrigins,
 ]));
 console.log('[amazeeai-config] Set gateway.controlUi.allowedOrigins to:', config.gateway.controlUi.allowedOrigins.join(', '));
 
