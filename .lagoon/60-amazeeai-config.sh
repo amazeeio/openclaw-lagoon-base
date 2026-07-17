@@ -759,6 +759,13 @@ function configureChannels() {
     config.channels.slack.groupPolicy = process.env.SLACK_GROUP_POLICY || 'open';
     console.log('[amazeeai-config] Configured Slack channel (groupPolicy=' + config.channels.slack.groupPolicy + ')');
   }
+
+  // Fleet policy: Slack replies always go into a thread on the triggering
+  // message. Enforced on every start (covers Control-UI-configured Slack too).
+  if (config.channels.slack) {
+    config.channels.slack.replyToMode = 'first';
+    console.log('[amazeeai-config] Enforced Slack replyToMode=first (always reply in thread)');
+  }
 }
 
 function sanitizeModelInputs() {
