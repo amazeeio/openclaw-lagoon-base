@@ -1,5 +1,5 @@
-ARG OPENCLAW_VERSION=2026.7.1
-ARG RELEASE_VERSION=2026.7.1_2
+ARG OPENCLAW_VERSION=2026.7.2-beta.2
+ARG RELEASE_VERSION=2026.7.2-beta.2_1
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
@@ -66,7 +66,7 @@ RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
     && fix-claw-permissions /home/.openclaw
 
 ENV NODE_ENV=production \
-    NODE_OPTIONS="--require /lagoon/openclaw-patch.js --max-old-space-size=4096" \
+    NODE_OPTIONS="--require /lagoon/openclaw-patch.js --max-old-space-size=3072" \
     HOME=/home \
     OPENCLAW_GATEWAY_PORT=3000 \
     OPENCLAW_NO_RESPAWN=1 \
