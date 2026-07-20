@@ -476,10 +476,12 @@ async function discoverModels() {
     let format = 'info';
     let success = false;
 
+    const fetchOptions = { headers, signal: AbortSignal.timeout(5000) };
+
     // Try /v1/model/info
     try {
       console.log('[amazeeai-config] Attempting model discovery from /v1/model/info...');
-      const response = await fetch(`${baseUrl}/v1/model/info`, { headers });
+      const response = await fetch(`${baseUrl}/v1/model/info`, fetchOptions);
       if (response.ok) {
         const payload = await response.json();
         if (payload.data && Array.isArray(payload.data)) {
@@ -498,7 +500,7 @@ async function discoverModels() {
     if (!success) {
       try {
         console.log('[amazeeai-config] Attempting model discovery from /v1/models...');
-        const response = await fetch(`${baseUrl}/v1/models`, { headers });
+        const response = await fetch(`${baseUrl}/v1/models`, fetchOptions);
         if (response.ok) {
           const payload = await response.json();
           const list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.data) ? payload.data : null);
@@ -519,7 +521,7 @@ async function discoverModels() {
     if (!success) {
       try {
         console.log('[amazeeai-config] Attempting model discovery from /models...');
-        const response = await fetch(`${baseUrl}/models`, { headers });
+        const response = await fetch(`${baseUrl}/models`, fetchOptions);
         if (response.ok) {
           const payload = await response.json();
           const list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.data) ? payload.data : null);
