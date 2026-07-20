@@ -993,7 +993,27 @@ echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-bl
 ( ensure_channel_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
 
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
-openclaw exec-policy preset yolo || true
+yolo_out=$(openclaw exec-policy preset yolo 2>&1) || true
+printf '%s\n' "$yolo_out"
+
+# Self-heal a state DB written by a NEWER OpenClaw build than this image (e.g.
+# after an image rollback). OpenClaw refuses to open such a DB ("uses newer
+# schema version N; this build supports M") and the gateway is bricked until
+# someone deletes it by hand. Every openclaw CLI call surfaces that error via
+# its health-state write, so the yolo output above doubles as the probe at no
+# extra boot cost. Move each offending DB aside (timestamped backup, restorable
+# after a re-upgrade) so the gateway re-initialises a fresh one it can open.
+bad_dbs=$(printf '%s\n' "$yolo_out" | sed -n 's|.* \(/[^ ]*\.sqlite\) uses newer schema version.*|\1|p' | sort -u)
+if [ -n "$bad_dbs" ]; then
+  for db in $bad_dbs; do
+    backup="${db}.newer-schema.$(date +%s).bak"
+    echo "[amazeeai-config] State DB $db was written by a newer OpenClaw build; moving it to $backup and reinitialising..."
+    mv "$db" "$backup" || true
+    rm -f "${db}-shm" "${db}-wal" || true
+  done
+  # Re-apply now that a fresh DB can be created at this build's schema.
+  openclaw exec-policy preset yolo || true
+fi
 
 # Only run openclaw doctor --fix if upgrading from an older version or legacy state files exist.
 # Fresh project deployments skip this check completely (0ms overhead).
