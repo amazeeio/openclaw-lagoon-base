@@ -980,5 +980,8 @@ echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-bl
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
 openclaw exec-policy preset yolo || true
 
+echo "[amazeeai-config] Running automatic workspace and state migrations (openclaw doctor --fix)..."
+openclaw doctor --fix --yes 2>/dev/null || openclaw doctor --fix 2>/dev/null || true
+
 echo "[amazeeai-config] Configuration complete. Starting OpenClaw gateway..."
 echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no output is normal)."
