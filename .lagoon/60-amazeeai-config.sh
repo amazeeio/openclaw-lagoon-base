@@ -277,9 +277,14 @@ function configureExtraBootstrapHooks(relativePaths) {
   console.log('[amazeeai-config] Enabled hooks.internal.entries.bootstrap-extra-files for', relativePaths.length, 'path(s)');
 }
 
-// Initialize compaction memory flush defaults only when not already configured.
+// Initialize compaction memory flush defaults and ensure reserveTokensFloor is at least 50000.
+const minReserveTokensFloor = parseInt(process.env.OPENCLAW_RESERVE_TOKENS_FLOOR, 10) || 50000;
+if (!config.agents.defaults.compaction.reserveTokensFloor || config.agents.defaults.compaction.reserveTokensFloor < minReserveTokensFloor) {
+  config.agents.defaults.compaction.reserveTokensFloor = minReserveTokensFloor;
+  console.log('[amazeeai-config] Set agents.defaults.compaction.reserveTokensFloor to:', minReserveTokensFloor);
+}
+
 if (!config.agents.defaults.compaction.memoryFlush) {
-  config.agents.defaults.compaction.reserveTokensFloor = 20000;
   config.agents.defaults.compaction.memoryFlush = {
     enabled: true,
     softThresholdTokens: 40000,
