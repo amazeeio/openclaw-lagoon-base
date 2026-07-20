@@ -124,6 +124,23 @@ if ! printf '%s' "$target_version" | grep -Eq '^[0-9]+(\.[0-9]+){2}([.-][0-9A-Za
   exit 1
 fi
 
+# The Dockerfile builds FROM ghcr.io/openclaw/openclaw:<version>-browser. npm can
+# publish a version (e.g. an "-N" hotfix republish like 2026.7.1-2) with no
+# matching browser image; bumping to it makes main unbuildable and every publish
+# fails. Only bump when the browser image actually exists.
+if [ "$target_version" != "$current_version" ]; then
+  browser_tag="${target_version}-browser"
+  ghcr_token=$(curl -fsSL "https://ghcr.io/token?scope=repository:openclaw/openclaw:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+  manifest_status=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $ghcr_token" \
+    -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+    "https://ghcr.io/v2/openclaw/openclaw/manifests/$browser_tag")
+  if [ "$manifest_status" != "200" ]; then
+    echo "OpenClaw $target_version has no ghcr.io/openclaw/openclaw:$browser_tag image (status $manifest_status); skipping bump to keep main buildable."
+    exit 0
+  fi
+fi
+
 if [ -n "$base_revision" ]; then
   target_release_version="${target_version}_${base_revision}"
 else
