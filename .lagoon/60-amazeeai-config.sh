@@ -882,12 +882,20 @@ EOFNODE
 
 configPath="/home/.openclaw/openclaw.json"
 
-# Detect OpenClaw core version change (drives post-upgrade migrations below)
+# Detect OpenClaw core version change and legacy state files
 OLD_VER="0"
+IS_FRESH_INSTALL=0
 if [ -f "$configPath" ]; then
   OLD_VER=$(jq -r '.meta.lastTouchedVersion // "0"' "$configPath" 2>/dev/null || echo "0")
+else
+  IS_FRESH_INSTALL=1
 fi
 CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
+
+LEGACY_FILES_FOUND=0
+if [ -f "/home/.openclaw/subagents/runs.json" ] || [ -f "/home/.openclaw/workspace/setup-state.json" ] || [ -f "/home/.openclaw/workspace/.setup-state" ]; then
+  LEGACY_FILES_FOUND=1
+fi
 
 # ============================================================
 # Ensure external channel plugins are present on the state volume (BACKGROUND)
@@ -980,8 +988,20 @@ echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-bl
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
 openclaw exec-policy preset yolo || true
 
-echo "[amazeeai-config] Running automatic workspace and state migrations (openclaw doctor --fix)..."
-openclaw doctor --fix --yes 2>/dev/null || openclaw doctor --fix 2>/dev/null || true
+# Only run openclaw doctor --fix if upgrading from an older version or legacy state files exist.
+# Fresh project deployments skip this check completely (0ms overhead).
+if [ "$LEGACY_FILES_FOUND" -eq 1 ] || { [ "$IS_FRESH_INSTALL" -eq 0 ] && [ "$OLD_VER" != "$CURRENT_VER" ]; }; then
+  echo "[amazeeai-config] OpenClaw upgrade/legacy state detected ($OLD_VER -> $CURRENT_VER). Running openclaw doctor --fix..."
+  openclaw doctor --fix --yes 2>/dev/null || openclaw doctor --fix 2>/dev/null || true
+  
+  # Stamp current version into openclaw.json so future restarts skip doctor
+  if [ -f "$configPath" ]; then
+    tmp_cfg=$(mktemp)
+    jq --arg v "$CURRENT_VER" '.meta = (.meta // {}) | .meta.lastTouchedVersion = $v' "$configPath" > "$tmp_cfg" 2>/dev/null && mv "$tmp_cfg" "$configPath" || true
+  fi
+else
+  echo "[amazeeai-config] Fresh deployment or up-to-date state; skipping openclaw doctor --fix."
+fi
 
 echo "[amazeeai-config] Configuration complete. Starting OpenClaw gateway..."
 echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no output is normal)."
