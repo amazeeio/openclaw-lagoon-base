@@ -1,5 +1,5 @@
 ARG OPENCLAW_VERSION=2026.7.1-2
-ARG RELEASE_VERSION=2026.7.1-2
+ARG RELEASE_VERSION=2026.7.1-2_1
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
@@ -99,6 +99,12 @@ ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openc
 # the registry first so version resolution against the fresh seed state dir works.
 # set -e makes any plugin install failure fail the build, so a shipped image
 # always has the complete default plugin set (no silent partial seed).
+# This RUN executes as root with npm_config_cache=/tmp/.npm, so it bakes a
+# root-owned npm/node cache into the image. At runtime the container is uid 10000
+# and cannot write it, so installing a configured-but-not-seeded plugin (e.g. a
+# user-enabled brave plugin) fails with EACCES and the gateway refuses to start.
+# The final rm drops the build caches so npm/node recreate them as the runtime
+# user on first use.
 RUN set -eu; \
     export OPENCLAW_STATE_DIR="$OPENCLAW_SEED_DIR" HOME="$OPENCLAW_SEED_DIR"; \
     mkdir -p "$OPENCLAW_SEED_DIR"; \
@@ -108,7 +114,8 @@ RUN set -eu; \
       openclaw plugins install "$pkg"; \
     done; \
     rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json; \
-    chmod -R a+rX "$OPENCLAW_SEED_DIR/npm"
+    chmod -R a+rX "$OPENCLAW_SEED_DIR/npm"; \
+    rm -rf /tmp/.npm /tmp/openclaw-compile-cache
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
     fix-claw-permissions /home/.openclaw
