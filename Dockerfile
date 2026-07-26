@@ -1,5 +1,5 @@
-ARG OPENCLAW_VERSION=2026.7.2-beta.2
-ARG RELEASE_VERSION=2026.7.2-beta.2_7
+ARG OPENCLAW_VERSION=2026.7.2-beta.4
+ARG RELEASE_VERSION=2026.7.2-beta.4_1
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
