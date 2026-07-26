@@ -32,6 +32,22 @@ node << 'EOFNODE'
 const fs = require('fs');
 const path = require('path');
 
+// OpenClaw 2026.7.2-beta.4 migrates gateway.controlUi.dangerouslyDisableDeviceAuth away
+// (doctor records the migration) and the gateway then REJECTS the key if anything
+// re-adds it. Gate all writes of that key on the runtime version.
+function runtimeAcceptsLegacyDeviceAuthFlag() {
+  const v = String(process.env.OPENCLAW_RUNTIME_VERSION || '');
+  const m = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?/);
+  if (!m) return true; // unknown version: keep legacy behaviour (pre-beta.4 images lack the env var)
+  const [maj, min, pat] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const beta = m[4] === undefined ? Infinity : Number(m[4]); // stable > any beta of same version
+  if (maj !== 2026) return maj < 2026;
+  if (min !== 7) return min < 7;
+  if (pat !== 2) return pat < 2;
+  return beta < 4;
+}
+const legacyDeviceAuthFlag = runtimeAcceptsLegacyDeviceAuthFlag();
+
 // Config paths - use OPENCLAW_STATE_DIR if set, otherwise default to home directory
 const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(process.env.HOME || '/home', '.openclaw');
 const configPath = path.join(stateDir, 'openclaw.json');
@@ -70,7 +86,7 @@ const configTemplate = {
     port: gatewayPort,
     mode: 'local',
     controlUi: {
-      dangerouslyDisableDeviceAuth: true,
+      // dangerouslyDisableDeviceAuth is added conditionally below (legacy, pre-beta.4 only)
       allowedOrigins: ['http://localhost:3000', 'http://localhost:4173', 'http://localhost:6006', 'https://alpha.amazeeclaw.amazee.ai', 'https://my.amazee.io', 'https://my.amazeeio.review'],
     },
   },
@@ -388,9 +404,16 @@ if (!config.gateway.mode) {
 if (!config.gateway.controlUi) {
   config.gateway.controlUi = {};
 }
-if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
-  config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
-  console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
+if (legacyDeviceAuthFlag) {
+  if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
+    config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+    console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
+  }
+} else if (config.gateway.controlUi.dangerouslyDisableDeviceAuth !== undefined) {
+  // beta.4+ migrated this key away; leaving it (or re-adding it) makes the gateway
+  // refuse to start with "Unrecognized key". Doctor's migration state covers the intent.
+  delete config.gateway.controlUi.dangerouslyDisableDeviceAuth;
+  console.log('[amazeeai-config] Removed legacy gateway.controlUi.dangerouslyDisableDeviceAuth (runtime >= 2026.7.2-beta.4)');
 }
 
 // The gateway only ever sees traffic via Lagoon's in-cluster router, so trust

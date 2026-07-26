@@ -1,5 +1,5 @@
 ARG OPENCLAW_VERSION=2026.7.2-beta.4
-ARG RELEASE_VERSION=2026.7.2-beta.4_1
+ARG RELEASE_VERSION=2026.7.2-beta.4_2
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
@@ -94,6 +94,11 @@ ENV NODE_ENV=production \
 # gateway rebuilds install records from a filesystem scan at startup) and drop the
 # build-time state/config so no stale config is seeded.
 ENV OPENCLAW_SEED_DIR=/lagoon/seed-openclaw
+# Expose the runtime OpenClaw version to boot scripts: 60-amazeeai-config.sh gates
+# legacy config keys (gateway.controlUi.dangerouslyDisableDeviceAuth) on it —
+# 2026.7.2-beta.4+ migrates that key away and rejects it if re-added.
+ARG OPENCLAW_VERSION
+ENV OPENCLAW_RUNTIME_VERSION=${OPENCLAW_VERSION}
 ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
 # `openclaw plugins install` takes ONE package per invocation, so loop. Refresh
 # the registry first so version resolution against the fresh seed state dir works.
