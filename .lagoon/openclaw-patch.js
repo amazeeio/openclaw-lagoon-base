@@ -16,6 +16,17 @@ function shouldBypassError(err, p) {
   return absPath.startsWith(targetStateDir);
 }
 
+// The bypasses are expected in this containerized setup (the state dir mount cannot
+// be chmodded by uid 10000); warn once per operation+path instead of flooding the
+// gateway logs on every boot and doctor run.
+const warnedBypasses = new Set();
+function warnBypassOnce(op, p, err) {
+  const key = op + ':' + String(p);
+  if (warnedBypasses.has(key)) return;
+  warnedBypasses.add(key);
+  console.warn(`[openclaw-patch] Bypassed ${op} error on ${p}: ${err.message} (suppressing repeats)`);
+}
+
 // 1. Patch fs.chmodSync
 const origChmodSync = fs.chmodSync;
 fs.chmodSync = function(p, mode) {
@@ -23,7 +34,7 @@ fs.chmodSync = function(p, mode) {
     return origChmodSync.call(this, p, mode);
   } catch (err) {
     if (shouldBypassError(err, p)) {
-      console.warn(`[openclaw-patch] Bypassed fs.chmodSync error on ${p}: ${err.message}`);
+      warnBypassOnce("fs.chmodSync", p, err);
       return;
     }
     throw err;
@@ -38,7 +49,7 @@ fs.chmod = function(p, mode, callback) {
   }
   return origChmod.call(this, p, mode, function(err, ...args) {
     if (err && shouldBypassError(err, p)) {
-      console.warn(`[openclaw-patch] Bypassed fs.chmod error on ${p}: ${err.message}`);
+      warnBypassOnce("fs.chmod", p, err);
       return callback(null, ...args);
     }
     return callback(err, ...args);
@@ -53,7 +64,7 @@ if (origPromisesChmod) {
       return await origPromisesChmod.call(this, p, mode);
     } catch (err) {
       if (shouldBypassError(err, p)) {
-        console.warn(`[openclaw-patch] Bypassed fs.promises.chmod error on ${p}: ${err.message}`);
+        warnBypassOnce("fs.promises.chmod", p, err);
         return;
       }
       throw err;
@@ -69,7 +80,7 @@ if (origFspChmod) {
       return await origFspChmod.call(this, p, mode);
     } catch (err) {
       if (shouldBypassError(err, p)) {
-        console.warn(`[openclaw-patch] Bypassed fs/promises.chmod error on ${p}: ${err.message}`);
+        warnBypassOnce("fs/promises.chmod", p, err);
         return;
       }
       throw err;
