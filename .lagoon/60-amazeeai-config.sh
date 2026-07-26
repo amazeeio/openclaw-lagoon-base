@@ -27,26 +27,81 @@ if [ -f "${STATE_DB}-shm" ] || [ -f "${STATE_DB}-wal" ]; then
   rm -f "${STATE_DB}-shm" "${STATE_DB}-wal" || true
 fi
 
+# On block storage (basic-single/EBS), switch every SQLite DB to Write-Ahead
+# Logging for markedly better concurrency/performance. WAL is unusable on
+# NFS/EFS (its shared-memory locking does not work there), so skip on nfs —
+# the frozen node-persistent instances keep journal_mode=delete.
+FS_TYPE="$(stat -f -c %T "${OPENCLAW_STATE_DIR:-/home/.openclaw}" 2>/dev/null || echo unknown)"
+case "$FS_TYPE" in
+  nfs*) echo "[amazeeai-config] NFS volume detected (${FS_TYPE}); leaving SQLite journal_mode unchanged" ;;
+  *)
+    if command -v sqlite3 >/dev/null 2>&1; then
+      echo "[amazeeai-config] Block storage (${FS_TYPE}); ensuring SQLite WAL journal mode..."
+      find "${OPENCLAW_STATE_DIR:-/home/.openclaw}" -name '*.sqlite' -not -path '*/npm/*' 2>/dev/null | while read -r db; do
+        sqlite3 "$db" "PRAGMA journal_mode=WAL;" >/dev/null 2>&1 || true
+      done
+    fi
+    ;;
+esac
+
 
 node << 'EOFNODE'
 const fs = require('fs');
 const path = require('path');
 
-// OpenClaw 2026.7.2-beta.4 migrates gateway.controlUi.dangerouslyDisableDeviceAuth away
-// (doctor records the migration) and the gateway then REJECTS the key if anything
-// re-adds it. Gate all writes of that key on the runtime version.
-function runtimeAcceptsLegacyDeviceAuthFlag() {
+// OpenClaw config schemas diverge at a strict-validation boundary (currently
+// 2026.7.2-beta.4): newer runtimes REJECT keys the older schema wrote, and their
+// doctor WRITES keys older runtimes reject. Gate every era-specific write on which
+// schema the runtime uses, and scrub whichever key set does not belong (so both
+// upgrades and rollbacks always boot). Bump this constant when a future release
+// moves the boundary again.
+const STRICT_CONFIG_SCHEMA_SINCE = { major: 2026, minor: 7, patch: 2, beta: 4 };
+function runtimeUsesLegacyConfigSchema() {
   const v = String(process.env.OPENCLAW_RUNTIME_VERSION || '');
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?/);
-  if (!m) return true; // unknown version: keep legacy behaviour (pre-beta.4 images lack the env var)
+  if (!m) return true; // unknown version: keep legacy behaviour (older images lack the env var)
   const [maj, min, pat] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const beta = m[4] === undefined ? Infinity : Number(m[4]); // stable > any beta of same version
-  if (maj !== 2026) return maj < 2026;
-  if (min !== 7) return min < 7;
-  if (pat !== 2) return pat < 2;
-  return beta < 4;
+  const b = STRICT_CONFIG_SCHEMA_SINCE;
+  if (maj !== b.major) return maj < b.major;
+  if (min !== b.minor) return min < b.minor;
+  if (pat !== b.patch) return pat < b.patch;
+  return beta < b.beta;
 }
-const legacyDeviceAuthFlag = runtimeAcceptsLegacyDeviceAuthFlag();
+const legacyConfigSchema = runtimeUsesLegacyConfigSchema();
+
+// See https://github.com/amazeeio/openclaw-lagoon-base/issues/7 for the full audit.
+const LEGACY_ONLY_CONFIG_KEYS = [ // rejected by the strict schema
+  ['gateway', 'controlUi', 'dangerouslyDisableDeviceAuth'],
+  ['agents', 'defaults', 'compaction', 'reserveTokensFloor'],
+  ['agents', 'defaults', 'compaction', 'memoryFlush'],
+  ['agents', 'defaults', 'memorySearch'],
+  ['agents', 'defaults', 'contextPruning', 'keepLastAssistants'],
+  ['meta', 'lastTouchedAt'],
+  ['commands', 'ownerDisplay'],
+  // strict-schema runtimes get tools.exec.mode from their own `exec-policy preset`,
+  // which cannot be combined with the legacy security/ask pair.
+  ['tools', 'exec', 'security'],
+  ['tools', 'exec', 'ask'],
+];
+const STRICT_ONLY_CONFIG_KEYS = [ // written by strict-schema runtimes, rejected by legacy ones
+  ['meta', 'migrations'],
+  ['agents', 'defaults', 'modelPolicy'],
+  ['memory', 'search'],
+  ['tools', 'exec', 'mode'],
+];
+function scrubConfigPaths(cfg, paths, label) {
+  const removed = [];
+  for (const p of paths) {
+    let node = cfg;
+    for (let i = 0; i < p.length - 1 && node; i++) node = node[p[i]];
+    if (node && Object.prototype.hasOwnProperty.call(node, p[p.length - 1])) {
+      delete node[p[p.length - 1]];
+      removed.push(p.join('.'));
+    }
+  }
+  if (removed.length) console.log('[amazeeai-config] Scrubbed ' + label + ' config keys:', removed.join(', '));
+}
 
 // Config paths - use OPENCLAW_STATE_DIR if set, otherwise default to home directory
 const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(process.env.HOME || '/home', '.openclaw');
@@ -78,8 +133,9 @@ const configTemplate = {
     allow: ['*'],
     exec: {
       host: 'gateway',
-      security: 'full',
-      ask: 'off'
+      // security/ask are added conditionally below: legacy pre-beta.4 knobs.
+      // On beta.4+ the entrypoint's `openclaw exec-policy preset yolo` writes
+      // tools.exec.mode instead, and mode cannot coexist with security/ask.
     }
   },
   gateway: {
@@ -293,26 +349,30 @@ function configureExtraBootstrapHooks(relativePaths) {
   console.log('[amazeeai-config] Enabled hooks.internal.entries.bootstrap-extra-files for', relativePaths.length, 'path(s)');
 }
 
-// 2026.7.2-beta.4 reshaped agents.defaults.compaction (no reserveTokensFloor/memoryFlush)
-// and dropped agents.defaults.memorySearch entirely; strict validation rejects them.
-// Pre-beta.4: keep our tuning. beta.4+: scrub the legacy keys and let upstream defaults rule.
-if (!legacyDeviceAuthFlag) {
-  const d = config.agents.defaults;
-  let scrubbed = [];
-  if (d.compaction && d.compaction.reserveTokensFloor !== undefined) { delete d.compaction.reserveTokensFloor; scrubbed.push('compaction.reserveTokensFloor'); }
-  if (d.compaction && d.compaction.memoryFlush !== undefined) { delete d.compaction.memoryFlush; scrubbed.push('compaction.memoryFlush'); }
-  if (d.memorySearch !== undefined) { delete d.memorySearch; scrubbed.push('memorySearch'); }
-  if (scrubbed.length) console.log('[amazeeai-config] Removed legacy agent tuning keys for runtime >= 2026.7.2-beta.4:', scrubbed.join(', '));
+// Era scrub: remove whichever key set does not belong to this runtime (upgrade AND
+// rollback safety — a beta.4 boot must not leave keys a beta.2 rollback rejects,
+// and vice versa). Runs before all conditional writes below, which are era-gated.
+if (legacyConfigSchema) {
+  scrubConfigPaths(config, STRICT_ONLY_CONFIG_KEYS, 'strict-schema (runtime uses legacy schema)');
+  if (config.memory && Object.keys(config.memory).length === 0) delete config.memory;
+  // Legacy exec knobs (fill-if-absent). beta.4+ gets tools.exec.mode from the
+  // entrypoint's `exec-policy preset yolo` instead.
+  config.tools = config.tools || {};
+  config.tools.exec = config.tools.exec || {};
+  if (config.tools.exec.security === undefined) config.tools.exec.security = 'full';
+  if (config.tools.exec.ask === undefined) config.tools.exec.ask = 'off';
+} else {
+  scrubConfigPaths(config, LEGACY_ONLY_CONFIG_KEYS, 'legacy-schema');
 }
 
 // Initialize compaction memory flush defaults and ensure reserveTokensFloor is at least 50000.
 const minReserveTokensFloor = parseInt(process.env.OPENCLAW_RESERVE_TOKENS_FLOOR, 10) || 50000;
-if (legacyDeviceAuthFlag && (!config.agents.defaults.compaction.reserveTokensFloor || config.agents.defaults.compaction.reserveTokensFloor < minReserveTokensFloor)) {
+if (legacyConfigSchema && (!config.agents.defaults.compaction.reserveTokensFloor || config.agents.defaults.compaction.reserveTokensFloor < minReserveTokensFloor)) {
   config.agents.defaults.compaction.reserveTokensFloor = minReserveTokensFloor;
   console.log('[amazeeai-config] Set agents.defaults.compaction.reserveTokensFloor to:', minReserveTokensFloor);
 }
 
-if (legacyDeviceAuthFlag && !config.agents.defaults.compaction.memoryFlush) {
+if (legacyConfigSchema && !config.agents.defaults.compaction.memoryFlush) {
   config.agents.defaults.compaction.memoryFlush = {
     enabled: true,
     softThresholdTokens: 40000,
@@ -324,19 +384,20 @@ if (legacyDeviceAuthFlag && !config.agents.defaults.compaction.memoryFlush) {
 }
 
 // Initialize context pruning defaults only when not already configured.
+// mode/ttl are valid on all runtimes; keepLastAssistants was removed in beta.4.
 if (!config.agents.defaults.contextPruning) {
   config.agents.defaults.contextPruning = {
     mode: 'cache-ttl',
     ttl: '6h',
-    keepLastAssistants: 3,
   };
+  if (legacyConfigSchema) config.agents.defaults.contextPruning.keepLastAssistants = 3;
   console.log('[amazeeai-config] Initialized context pruning defaults');
 } else {
   console.log('[amazeeai-config] Existing context pruning config detected; leaving unchanged');
 }
 
 // Initialize memory search defaults only when not already configured.
-if (legacyDeviceAuthFlag && !config.agents.defaults.memorySearch) {
+if (legacyConfigSchema && !config.agents.defaults.memorySearch) {
   config.agents.defaults.memorySearch = {
     experimental: {
       sessionMemory: true,
@@ -349,7 +410,7 @@ if (legacyDeviceAuthFlag && !config.agents.defaults.memorySearch) {
 }
 
 // Initialize memory search hybrid query defaults only when not already configured.
-if (legacyDeviceAuthFlag && !config.agents.defaults.memorySearch.query?.hybrid) {
+if (legacyConfigSchema && !config.agents.defaults.memorySearch.query?.hybrid) {
   config.agents.defaults.memorySearch.query = config.agents.defaults.memorySearch.query || {};
   config.agents.defaults.memorySearch.query.hybrid = {
     enabled: true,
@@ -401,6 +462,17 @@ const seededDefaults = {
         enabled: true,
         config: { routes: {} },
       },
+      // Pre-trust the channel plugins seeded into the image (DEFAULT_PLUGINS in the
+      // Dockerfile). Hosted users have no ssh access, so requiring a manual
+      // `openclaw plugins enable <name>` ("installed without explicit trust")
+      // before Slack/WhatsApp/etc. can be configured is pure friction. Enabling a
+      // plugin whose channel is unconfigured is a no-op; user opt-outs survive
+      // (fill-if-absent).
+      slack: { enabled: true },
+      discord: { enabled: true },
+      whatsapp: { enabled: true },
+      msteams: { enabled: true },
+      googlechat: { enabled: true },
     },
   },
 };
@@ -416,16 +488,11 @@ if (!config.gateway.mode) {
 if (!config.gateway.controlUi) {
   config.gateway.controlUi = {};
 }
-if (legacyDeviceAuthFlag) {
-  if (config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
-    config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
-    console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
-  }
-} else if (config.gateway.controlUi.dangerouslyDisableDeviceAuth !== undefined) {
-  // beta.4+ migrated this key away; leaving it (or re-adding it) makes the gateway
-  // refuse to start with "Unrecognized key". Doctor's migration state covers the intent.
-  delete config.gateway.controlUi.dangerouslyDisableDeviceAuth;
-  console.log('[amazeeai-config] Removed legacy gateway.controlUi.dangerouslyDisableDeviceAuth (runtime >= 2026.7.2-beta.4)');
+// Legacy device-auth flag: write only on pre-beta.4 runtimes (beta.4+ removal is
+// handled by the LEGACY_ONLY_CONFIG_KEYS era scrub above).
+if (legacyConfigSchema && config.gateway.controlUi.dangerouslyDisableDeviceAuth === undefined) {
+  config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+  console.log('[amazeeai-config] Set gateway.controlUi.dangerouslyDisableDeviceAuth to default value: true');
 }
 
 // The gateway only ever sees traffic via Lagoon's in-cluster router, so trust
@@ -678,8 +745,12 @@ async function discoverModels() {
       providerConfig.apiKey = apiKey;
     }
 
+    // Generous LLM timeout: hosted claws run long tool-use turns; the upstream
+    // default is too tight and users cannot ssh in to tune it themselves.
+    providerConfig.timeoutSeconds = parseInt(process.env.AMAZEEAI_TIMEOUT_SECONDS, 10) || 600;
+
     config.models.providers.amazeeai = providerConfig;
-    console.log('[amazeeai-config] Added amazeeai provider with', models.length, 'models');
+    console.log('[amazeeai-config] Added amazeeai provider with', models.length, 'models (timeoutSeconds=' + providerConfig.timeoutSeconds + ')');
 
     const discoveredAllowlist = {};
     for (const model of models) {
@@ -781,6 +852,11 @@ function configureChannels() {
     config.channels.telegram.botToken = '${TELEGRAM_BOT_TOKEN}';
     config.channels.telegram.enabled = true;
     config.channels.telegram.dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    if (process.env.TELEGRAM_GROUP_POLICY) {
+      config.channels.telegram.groupPolicy = process.env.TELEGRAM_GROUP_POLICY;
+    } else if (config.channels.telegram.groupPolicy === undefined) {
+      config.channels.telegram.groupPolicy = 'allowlist';
+    }
     console.log('[amazeeai-config] Configured Telegram channel');
   }
 
@@ -790,6 +866,11 @@ function configureChannels() {
     config.channels.discord.enabled = true;
     config.channels.discord.dm = config.channels.discord.dm || {};
     config.channels.discord.dm.policy = process.env.DISCORD_DM_POLICY || 'pairing';
+    if (process.env.DISCORD_GROUP_POLICY) {
+      config.channels.discord.groupPolicy = process.env.DISCORD_GROUP_POLICY;
+    } else if (config.channels.discord.groupPolicy === undefined) {
+      config.channels.discord.groupPolicy = 'allowlist';
+    }
     console.log('[amazeeai-config] Configured Discord channel');
   }
 
@@ -798,8 +879,19 @@ function configureChannels() {
     config.channels.slack.botToken = '${SLACK_BOT_TOKEN}';
     config.channels.slack.appToken = '${SLACK_APP_TOKEN}';
     config.channels.slack.enabled = true;
-    config.channels.slack.groupPolicy = process.env.SLACK_GROUP_POLICY || 'open';
-    console.log('[amazeeai-config] Configured Slack channel (groupPolicy=' + config.channels.slack.groupPolicy + ')');
+    // Invitation must not equal activation: anyone can invite the bot to a channel,
+    // so replies are limited to allowlisted channels (owner approves new ones via the
+    // Control UI / channel pairing). Env var enforces; otherwise fill-if-absent so an
+    // instance's existing persisted choice is never silently flipped.
+    if (process.env.SLACK_GROUP_POLICY) {
+      config.channels.slack.groupPolicy = process.env.SLACK_GROUP_POLICY;
+    } else if (config.channels.slack.groupPolicy === undefined) {
+      config.channels.slack.groupPolicy = 'allowlist';
+    }
+    // DMs stay behind pairing: a DM session can reach tools/data that channel
+    // members shouldn't get implicitly. Override per instance with SLACK_DM_POLICY.
+    config.channels.slack.dmPolicy = process.env.SLACK_DM_POLICY || 'pairing';
+    console.log('[amazeeai-config] Configured Slack channel (groupPolicy=' + config.channels.slack.groupPolicy + ', dmPolicy=' + config.channels.slack.dmPolicy + ')');
   }
 
   // Fleet policy: Slack replies always go into a thread on the triggering
