@@ -293,14 +293,26 @@ function configureExtraBootstrapHooks(relativePaths) {
   console.log('[amazeeai-config] Enabled hooks.internal.entries.bootstrap-extra-files for', relativePaths.length, 'path(s)');
 }
 
+// 2026.7.2-beta.4 reshaped agents.defaults.compaction (no reserveTokensFloor/memoryFlush)
+// and dropped agents.defaults.memorySearch entirely; strict validation rejects them.
+// Pre-beta.4: keep our tuning. beta.4+: scrub the legacy keys and let upstream defaults rule.
+if (!legacyDeviceAuthFlag) {
+  const d = config.agents.defaults;
+  let scrubbed = [];
+  if (d.compaction && d.compaction.reserveTokensFloor !== undefined) { delete d.compaction.reserveTokensFloor; scrubbed.push('compaction.reserveTokensFloor'); }
+  if (d.compaction && d.compaction.memoryFlush !== undefined) { delete d.compaction.memoryFlush; scrubbed.push('compaction.memoryFlush'); }
+  if (d.memorySearch !== undefined) { delete d.memorySearch; scrubbed.push('memorySearch'); }
+  if (scrubbed.length) console.log('[amazeeai-config] Removed legacy agent tuning keys for runtime >= 2026.7.2-beta.4:', scrubbed.join(', '));
+}
+
 // Initialize compaction memory flush defaults and ensure reserveTokensFloor is at least 50000.
 const minReserveTokensFloor = parseInt(process.env.OPENCLAW_RESERVE_TOKENS_FLOOR, 10) || 50000;
-if (!config.agents.defaults.compaction.reserveTokensFloor || config.agents.defaults.compaction.reserveTokensFloor < minReserveTokensFloor) {
+if (legacyDeviceAuthFlag && (!config.agents.defaults.compaction.reserveTokensFloor || config.agents.defaults.compaction.reserveTokensFloor < minReserveTokensFloor)) {
   config.agents.defaults.compaction.reserveTokensFloor = minReserveTokensFloor;
   console.log('[amazeeai-config] Set agents.defaults.compaction.reserveTokensFloor to:', minReserveTokensFloor);
 }
 
-if (!config.agents.defaults.compaction.memoryFlush) {
+if (legacyDeviceAuthFlag && !config.agents.defaults.compaction.memoryFlush) {
   config.agents.defaults.compaction.memoryFlush = {
     enabled: true,
     softThresholdTokens: 40000,
@@ -324,7 +336,7 @@ if (!config.agents.defaults.contextPruning) {
 }
 
 // Initialize memory search defaults only when not already configured.
-if (!config.agents.defaults.memorySearch) {
+if (legacyDeviceAuthFlag && !config.agents.defaults.memorySearch) {
   config.agents.defaults.memorySearch = {
     experimental: {
       sessionMemory: true,
@@ -337,7 +349,7 @@ if (!config.agents.defaults.memorySearch) {
 }
 
 // Initialize memory search hybrid query defaults only when not already configured.
-if (!config.agents.defaults.memorySearch.query?.hybrid) {
+if (legacyDeviceAuthFlag && !config.agents.defaults.memorySearch.query?.hybrid) {
   config.agents.defaults.memorySearch.query = config.agents.defaults.memorySearch.query || {};
   config.agents.defaults.memorySearch.query.hybrid = {
     enabled: true,
