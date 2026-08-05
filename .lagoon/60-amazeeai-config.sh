@@ -808,14 +808,26 @@ function configureMemorySearchRemoteFromAmazeeai() {
 
   const memorySearchBaseUrl = (process.env.AMAZEEAI_BASE_URL || '').replace(/\/+$/, '');
   const memorySearchApiKey = process.env.AMAZEEAI_API_KEY || '';
-  config.agents.defaults.memorySearch = config.agents.defaults.memorySearch || {};
-  config.agents.defaults.memorySearch.provider = 'openai';
-  config.agents.defaults.memorySearch.model = 'embeddings';
-  config.agents.defaults.memorySearch.remote = {
+  // Era-gated write location: strict runtimes (beta.4+) moved this to
+  // memory.search and REJECT agents.defaults.memorySearch at startup — an
+  // ungated legacy write here re-added the key the scrub just removed and
+  // bricked every instance whose backend exposes an embeddings model.
+  let memorySearchTarget;
+  if (legacyConfigSchema) {
+    config.agents.defaults.memorySearch = config.agents.defaults.memorySearch || {};
+    memorySearchTarget = config.agents.defaults.memorySearch;
+  } else {
+    config.memory = config.memory || {};
+    config.memory.search = config.memory.search || {};
+    memorySearchTarget = config.memory.search;
+  }
+  memorySearchTarget.provider = 'openai';
+  memorySearchTarget.model = 'embeddings';
+  memorySearchTarget.remote = {
     baseUrl: memorySearchBaseUrl ? `${memorySearchBaseUrl}/v1/` : '',
     apiKey: memorySearchApiKey,
   };
-  console.log('[amazeeai-config] Configured memorySearch for amazee.ai embeddings model');
+  console.log('[amazeeai-config] Configured memorySearch (' + (legacyConfigSchema ? 'agents.defaults.memorySearch' : 'memory.search') + ') for amazee.ai embeddings model');
 }
 
 // ============================================================
