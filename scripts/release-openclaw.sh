@@ -124,6 +124,28 @@ if ! printf '%s' "$target_version" | grep -Eq '^[0-9]+(\.[0-9]+){2}([.-][0-9A-Za
   exit 1
 fi
 
+# Never auto-downgrade: npm's `latest` dist-tag can point BELOW the version we
+# ship (we run 2026.7.2 betas while latest is a 2026.7.1-N hotfix republish).
+# Compare numeric cores; a prerelease -> stable move of the same core is the one
+# same-core case that counts as an upgrade.
+if [ "$target_version" != "$current_version" ]; then
+  target_core=$(printf '%s' "$target_version" | sed 's/[-+].*//')
+  current_core=$(printf '%s' "$current_version" | sed 's/[-+].*//')
+  allow_bump=0
+  if [ "$target_core" = "$current_core" ]; then
+    case "$current_version" in
+      *-*) case "$target_version" in *-*) allow_bump=0;; *) allow_bump=1;; esac;;
+      *) allow_bump=0;;
+    esac
+  elif [ "$(printf '%s\n%s\n' "$target_core" "$current_core" | sort -V | head -n1)" = "$current_core" ]; then
+    allow_bump=1
+  fi
+  if [ "$allow_bump" -eq 0 ]; then
+    echo "npm latest is $target_version but Dockerfile ships $current_version; not an upgrade, nothing to do."
+    exit 0
+  fi
+fi
+
 # The Dockerfile builds FROM ghcr.io/openclaw/openclaw:<version>-browser. npm can
 # publish a version (e.g. an "-N" hotfix republish like 2026.7.1-2) with no
 # matching browser image; bumping to it makes main unbuildable and every publish
@@ -154,9 +176,11 @@ fi
 
 tag_name="v$target_release_version"
 
+# Idempotent no-op, not an error: the scheduled workflow re-runs every 6h and
+# must go green when the release already exists.
 if git rev-parse -q --verify "refs/tags/$tag_name" >/dev/null 2>&1; then
-  echo "error: git tag $tag_name already exists" >&2
-  exit 1
+  echo "git tag $tag_name already exists; nothing to do."
+  exit 0
 fi
 
 if [ "$target_version" != "$current_version" ]; then
