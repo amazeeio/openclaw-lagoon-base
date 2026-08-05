@@ -106,6 +106,7 @@ if [ -z "$current_release_version" ]; then
   exit 1
 fi
 
+explicit_version="$target_version"
 if [ -z "$target_version" ]; then
   if [ -n "$base_revision" ]; then
     target_version="$current_version"
@@ -127,8 +128,9 @@ fi
 # Never auto-downgrade: npm's `latest` dist-tag can point BELOW the version we
 # ship (we run 2026.7.2 betas while latest is a 2026.7.1-N hotfix republish).
 # Compare numeric cores; a prerelease -> stable move of the same core is the one
-# same-core case that counts as an upgrade.
-if [ "$target_version" != "$current_version" ]; then
+# same-core case that counts as an upgrade. Only guards the AUTOMATED npm-latest
+# path — an explicit version argument (e.g. beta.4 -> beta.7) is deliberate.
+if [ -z "$explicit_version" ] && [ "$target_version" != "$current_version" ]; then
   target_core=$(printf '%s' "$target_version" | sed 's/[-+].*//')
   current_core=$(printf '%s' "$current_version" | sed 's/[-+].*//')
   allow_bump=0
