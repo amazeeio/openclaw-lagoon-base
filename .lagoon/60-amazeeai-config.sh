@@ -1024,7 +1024,11 @@ if [ -f "$configPath" ]; then
 else
   IS_FRESH_INSTALL=1
 fi
-CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
+# Keep the prerelease suffix: openclaw stamps meta.lastTouchedVersion with the
+# FULL version (e.g. 2026.7.2-beta.4). Stripping it here made OLD_VER never
+# equal CURRENT_VER, so every boot re-ran doctor --fix and rm-rf'd/re-copied
+# every seeded plugin, racing the gateway's startup plugin verification.
+CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' | head -n1 || echo "unknown")
 
 LEGACY_FILES_FOUND=0
 if [ -f "/home/.openclaw/subagents/runs.json" ] || [ -f "/home/.openclaw/workspace/setup-state.json" ] || [ -f "/home/.openclaw/workspace/.setup-state" ]; then
@@ -1032,7 +1036,7 @@ if [ -f "/home/.openclaw/subagents/runs.json" ] || [ -f "/home/.openclaw/workspa
 fi
 
 # ============================================================
-# Ensure external channel plugins are present on the state volume (BACKGROUND)
+# Ensure external channel plugins are present on the state volume
 #
 # In current OpenClaw, several chat channels ship as EXTERNAL plugins whose code
 # must live under /home/.openclaw/npm/projects before their config takes effect
@@ -1046,25 +1050,28 @@ fi
 # builds against the slow NFS volume and is what stalled the Kubernetes rollout
 # progress deadline; a copy avoids all of that. The gateway rebuilds its plugin
 # install records from a filesystem scan at startup, so copied-in projects are
-# discovered on the next gateway start with no `plugins install`/`registry
-# --refresh` needed (the documented "restart to activate" model).
+# discovered when it starts.
 #
-# CRITICAL: entrypoints.sh runs this script to completion *before* it execs the
-# gateway, so this work is detached to the background: the gateway starts
-# immediately and the pod becomes Ready, while plugins are populated out-of-band.
-# Newly seeded channels activate on the next gateway restart.
+# CRITICAL: the default-plugin copy runs SYNCHRONOUSLY, before entrypoints.sh
+# execs the gateway. The gateway hard-verifies every configured plugin at
+# startup; if one is missing it falls back to installing clawhub's floating
+# @beta tag, which can resolve to a version requiring a newer plugin API than
+# this image's pinned runtime (whatsapp needing beta.7 API on our beta.4
+# runtime bricked fleet deploys, 2026-08-05). That failure makes the gateway
+# refuse readiness and the deploy exceeds its rollout progress deadline.
+# Seeding before startup means the verifier finds the plugins on disk and
+# never touches the network. The copy is skipped when the volume already has
+# the projects for this core version, so steady-state boots pay nothing.
 #
 # Extras not baked into the image are installed via npm from OPENCLAW_EXTRA_PLUGINS,
 # e.g. OPENCLAW_EXTRA_PLUGINS="@openclaw/signal" (kept out of the default set: no
-# stable npm release matching the core version yet).
+# stable npm release matching the core version yet). Those stay in the
+# BACKGROUND (npm against NFS is the rollout-staller) and activate on the next
+# gateway restart.
 # ============================================================
-ensure_channel_plugins() {
+seed_default_plugins() {
   projects_dir="/home/.openclaw/npm/projects"
   seed_projects="${OPENCLAW_SEED_DIR:-/lagoon/seed-openclaw}/npm/projects"
-
-  # Let the freshly-started gateway initialise its state DB first, to minimise
-  # SQLite lock contention on the NFS volume while we touch the plugin projects.
-  sleep 20
 
   # Copy the image-baked default plugins onto the volume. `cp -RP` recurses but
   # never dereferences symlinks, so the openclaw -> /app peer symlink is copied as
@@ -1090,22 +1097,26 @@ ensure_channel_plugins() {
   else
     echo "[amazeeai-config] WARNING: no baked plugin seed at $seed_projects; skipping default plugin seeding"
   fi
+}
 
-  # Extras are not baked into the image: install any configured-but-missing ones
-  # via npm (rare; accepts the npm cost since it is opt-in per environment).
-  if [ -n "${OPENCLAW_EXTRA_PLUGINS:-}" ]; then
-    refreshed=""
-    for pkg in $OPENCLAW_EXTRA_PLUGINS; do
-      [ -n "$pkg" ] || continue
-      plugin_id="${pkg##*/}"   # e.g. "signal" from "@openclaw/signal"
-      ls -d "$projects_dir"/openclaw-"$plugin_id"-* >/dev/null 2>&1 && continue
-      [ -n "$refreshed" ] || { openclaw plugins registry --refresh || true; refreshed=1; }
-      echo "[amazeeai-config] Installing extra plugin $pkg ..."
-      openclaw plugins install "$pkg" || echo "[amazeeai-config] WARNING: failed to install plugin $pkg (continuing)"
-    done
-  fi
+install_extra_plugins() {
+  projects_dir="/home/.openclaw/npm/projects"
 
-  echo "[amazeeai-config] Channel plugin maintenance complete; restart gateway to activate newly added channels."
+  # Let the freshly-started gateway initialise its state DB first, to minimise
+  # SQLite lock contention on the NFS volume while npm touches the plugin projects.
+  sleep 20
+
+  refreshed=""
+  for pkg in $OPENCLAW_EXTRA_PLUGINS; do
+    [ -n "$pkg" ] || continue
+    plugin_id="${pkg##*/}"   # e.g. "signal" from "@openclaw/signal"
+    ls -d "$projects_dir"/openclaw-"$plugin_id"-* >/dev/null 2>&1 && continue
+    [ -n "$refreshed" ] || { openclaw plugins registry --refresh || true; refreshed=1; }
+    echo "[amazeeai-config] Installing extra plugin $pkg ..."
+    openclaw plugins install "$pkg" || echo "[amazeeai-config] WARNING: failed to install plugin $pkg (continuing)"
+  done
+
+  echo "[amazeeai-config] Extra-plugin maintenance complete; restart gateway to activate newly added channels."
 }
 
 # NOTE: invalid-config repair is handled inside the node block above by
@@ -1116,8 +1127,13 @@ ensure_channel_plugins() {
 # wipe above removes (chicken-and-egg). The JS migration is self-sufficient and
 # leaves a config the gateway accepts directly.
 
-echo "[amazeeai-config] Scheduling background channel-plugin maintenance (non-blocking)..."
-( ensure_channel_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
+echo "[amazeeai-config] Seeding default channel plugins (blocking; gateway verifies them at startup)..."
+seed_default_plugins
+
+if [ -n "${OPENCLAW_EXTRA_PLUGINS:-}" ]; then
+  echo "[amazeeai-config] Scheduling background extra-plugin install (non-blocking)..."
+  ( install_extra_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
+fi
 
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
 yolo_out=$(openclaw exec-policy preset yolo 2>&1) || true
