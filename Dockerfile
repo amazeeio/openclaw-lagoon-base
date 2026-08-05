@@ -1,5 +1,5 @@
 ARG OPENCLAW_VERSION=2026.7.2-beta.4
-ARG RELEASE_VERSION=2026.7.2-beta.4_4
+ARG RELEASE_VERSION=2026.7.2-beta.4_5
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
@@ -118,8 +118,12 @@ RUN set -eu; \
       echo "[seed] installing $pkg"; \
       openclaw plugins install "$pkg"; \
     done; \
-    rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json; \
-    chmod -R a+rX "$OPENCLAW_SEED_DIR/npm"; \
+    rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json "$OPENCLAW_SEED_DIR"/*.json.bak*; \
+    # a+rX must cover the seed dir ITSELF, not just npm/: the openclaw CLI runs
+    # above with HOME=$OPENCLAW_SEED_DIR and chmods its state dir to 0700, which
+    # made the whole seed invisible to the runtime uid 10000 — boot logged
+    # "no baked plugin seed" and every fresh instance fell back to clawhub.
+    chmod -R a+rX "$OPENCLAW_SEED_DIR"; \
     rm -rf /tmp/.npm /tmp/openclaw-compile-cache
 
 RUN chown -R openclaw:openclaw /home/.openclaw && \
