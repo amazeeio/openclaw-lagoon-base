@@ -451,6 +451,13 @@ function deepFillDefaults(target, defaults) {
 // Minimal platform defaults seeded into every instance (fill-if-absent only, so
 // user edits always win and survive redeploys). Add future minimal defaults here.
 const seededDefaults = {
+  // beta.7+ refuses to start when gateway.mode is absent ("suspicious or
+  // clobbered config"); older runtimes accept the key. Real volumes have it
+  // from first-run onboarding, but a script-built config never went through
+  // onboarding — seed it so fresh instances boot on strict runtimes.
+  gateway: {
+    mode: 'local',
+  },
   plugins: {
     entries: {
       // The bundled `webhooks` plugin ships in the OpenClaw image; enable it so

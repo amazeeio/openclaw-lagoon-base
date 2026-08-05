@@ -1,5 +1,5 @@
-ARG OPENCLAW_VERSION=2026.7.2-beta.4
-ARG RELEASE_VERSION=2026.7.2-beta.4_6
+ARG OPENCLAW_VERSION=2026.7.2-beta.7
+ARG RELEASE_VERSION=2026.7.2-beta.7_1
 
 # Stage 1: Get Lagoon commons tools
 # uselagoon/commons:26.5.1
@@ -113,10 +113,14 @@ ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openc
 RUN set -eu; \
     export OPENCLAW_STATE_DIR="$OPENCLAW_SEED_DIR" HOME="$OPENCLAW_SEED_DIR"; \
     mkdir -p "$OPENCLAW_SEED_DIR"; \
+    # Beta runtimes need the @beta plugin builds: the stable plugin releases
+    # target the stable core's plugin/migration APIs (2026.7.1 plugins on a
+    # beta.7 core fail startup state-migrations and channel module loading).
+    case "$OPENCLAW_VERSION" in *-beta*) plugin_tag="@beta";; *) plugin_tag="";; esac; \
     openclaw plugins registry --refresh || true; \
     for pkg in $DEFAULT_PLUGINS; do \
-      echo "[seed] installing $pkg"; \
-      openclaw plugins install "$pkg"; \
+      echo "[seed] installing ${pkg}${plugin_tag}"; \
+      openclaw plugins install "${pkg}${plugin_tag}"; \
     done; \
     rm -rf "$OPENCLAW_SEED_DIR/state" "$OPENCLAW_SEED_DIR/logs" "$OPENCLAW_SEED_DIR"/*.json "$OPENCLAW_SEED_DIR"/*.json.bak*; \
     # a+rX must cover the seed dir ITSELF, not just npm/: the openclaw CLI runs
