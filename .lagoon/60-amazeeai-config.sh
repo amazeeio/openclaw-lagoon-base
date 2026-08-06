@@ -56,19 +56,23 @@ const path = require('path');
 // upgrades and rollbacks always boot). Bump this constant when a future release
 // moves the boundary again.
 const STRICT_CONFIG_SCHEMA_SINCE = { major: 2026, minor: 7, patch: 2, beta: 4 };
-function runtimeUsesLegacyConfigSchema() {
+// beta.7 moved exec approvals from exec-approvals.json into the state DB and
+// BLOCKS every agent run (ExecApprovalsMigrationRequiredError) while the
+// legacy file exists.
+const EXEC_APPROVALS_DB_SINCE = { major: 2026, minor: 7, patch: 2, beta: 7 };
+function runtimeVersionBefore(b) {
   const v = String(process.env.OPENCLAW_RUNTIME_VERSION || '');
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?/);
   if (!m) return true; // unknown version: keep legacy behaviour (older images lack the env var)
   const [maj, min, pat] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const beta = m[4] === undefined ? Infinity : Number(m[4]); // stable > any beta of same version
-  const b = STRICT_CONFIG_SCHEMA_SINCE;
   if (maj !== b.major) return maj < b.major;
   if (min !== b.minor) return min < b.minor;
   if (pat !== b.patch) return pat < b.patch;
   return beta < b.beta;
 }
-const legacyConfigSchema = runtimeUsesLegacyConfigSchema();
+const legacyConfigSchema = runtimeVersionBefore(STRICT_CONFIG_SCHEMA_SINCE);
+const legacyExecApprovalsFile = runtimeVersionBefore(EXEC_APPROVALS_DB_SINCE);
 
 // See https://github.com/amazeeio/openclaw-lagoon-base/issues/7 for the full audit.
 const LEGACY_ONLY_CONFIG_KEYS = [ // rejected by the strict schema
@@ -220,29 +224,43 @@ const defaultApprovals = {
   }
 };
 
-let approvals = {};
-try {
-  if (fs.existsSync(approvalsPath)) {
-    approvals = JSON.parse(fs.readFileSync(approvalsPath, 'utf8'));
-    console.log('[amazeeai-config] Loaded existing exec-approvals.json');
-  } else {
+if (legacyExecApprovalsFile) {
+  let approvals = {};
+  try {
+    if (fs.existsSync(approvalsPath)) {
+      approvals = JSON.parse(fs.readFileSync(approvalsPath, 'utf8'));
+      console.log('[amazeeai-config] Loaded existing exec-approvals.json');
+    } else {
+      approvals = JSON.parse(JSON.stringify(defaultApprovals));
+      console.log('[amazeeai-config] Initializing exec-approvals.json from template');
+    }
+  } catch (e) {
+    console.log('[amazeeai-config] Error parsing exec-approvals.json, resetting to default:', e.message);
     approvals = JSON.parse(JSON.stringify(defaultApprovals));
-    console.log('[amazeeai-config] Initializing exec-approvals.json from template');
   }
-} catch (e) {
-  console.log('[amazeeai-config] Error parsing exec-approvals.json, resetting to default:', e.message);
-  approvals = JSON.parse(JSON.stringify(defaultApprovals));
+
+  // Ensure defaults are set
+  approvals.version = approvals.version || 1;
+  approvals.defaults = approvals.defaults || {};
+  approvals.defaults.security = 'full';
+  approvals.defaults.ask = 'off';
+  approvals.defaults.askFallback = 'full';
+
+  fs.writeFileSync(approvalsPath, JSON.stringify(approvals, null, 2));
+  console.log('[amazeeai-config] Enforced default exec-approvals.json at:', approvalsPath);
+} else {
+  // beta.7+ gates EVERY agent run on this file's absence — never (re)write it.
+  // The entrypoint's `exec-policy preset yolo` enforces the same defaults in
+  // the state DB on every boot. A file left by an older boot must be MIGRATED
+  // (doctor records it in the DB, then deletes it), not just removed — flag it
+  // for the shell to run doctor --fix after plugin seeding.
+  if (fs.existsSync(approvalsPath)) {
+    fs.writeFileSync('/tmp/.needs-exec-approvals-migration', '');
+    console.log('[amazeeai-config] Legacy exec-approvals.json present on a state-DB runtime; flagging for doctor migration');
+  } else {
+    console.log('[amazeeai-config] Exec approvals live in the state DB on this runtime; skipping exec-approvals.json');
+  }
 }
-
-// Ensure defaults are set
-approvals.version = approvals.version || 1;
-approvals.defaults = approvals.defaults || {};
-approvals.defaults.security = 'full';
-approvals.defaults.ask = 'off';
-approvals.defaults.askFallback = 'full';
-
-fs.writeFileSync(approvalsPath, JSON.stringify(approvals, null, 2));
-console.log('[amazeeai-config] Enforced default exec-approvals.json at:', approvalsPath);
 
 
 // Ensure required base fields from template are present
@@ -1152,6 +1170,16 @@ seed_default_plugins
 if [ -n "${OPENCLAW_EXTRA_PLUGINS:-}" ]; then
   echo "[amazeeai-config] Scheduling background extra-plugin install (non-blocking)..."
   ( install_extra_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
+fi
+
+# beta.7+ blocks every agent run while a legacy exec-approvals.json exists.
+# The node block flags a leftover file (it no longer writes one on those
+# runtimes); doctor migrates it into the state DB and deletes it. Must run
+# BEFORE the yolo preset, which also reads exec approvals.
+if [ -f /tmp/.needs-exec-approvals-migration ]; then
+  rm -f /tmp/.needs-exec-approvals-migration
+  echo "[amazeeai-config] Migrating legacy exec-approvals.json into the state DB (openclaw doctor --fix)..."
+  openclaw doctor --fix --yes 2>/dev/null || openclaw doctor --fix 2>/dev/null || true
 fi
 
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
