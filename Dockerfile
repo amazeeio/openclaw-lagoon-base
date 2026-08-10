@@ -60,6 +60,7 @@ COPY .lagoon/50-shell-config.sh /lagoon/entrypoints/50-shell-config.sh
 COPY .lagoon/amazeeai-model-refresher.js /lagoon/amazeeai-model-refresher.js
 COPY .lagoon/openclaw-patch.js /lagoon/openclaw-patch.js
 COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
+COPY .lagoon/70-device-auto-approve.sh /lagoon/entrypoints/70-device-auto-approve.sh
 COPY .lagoon/ssh_config /etc/ssh/ssh_config
 
 RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
