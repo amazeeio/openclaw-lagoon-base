@@ -100,7 +100,9 @@ ENV OPENCLAW_SEED_DIR=/lagoon/seed-openclaw
 # 2026.7.2-beta.4+ migrates that key away and rejects it if re-added.
 ARG OPENCLAW_VERSION
 ENV OPENCLAW_RUNTIME_VERSION=${OPENCLAW_VERSION}
-ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat"
+# brave-plugin is seeded (code on disk) but only ENABLED at boot when
+# BRAVE_API_KEY is set on the environment -- see 60-amazeeai-config.sh.
+ARG DEFAULT_PLUGINS="@openclaw/slack @openclaw/discord @openclaw/whatsapp @openclaw/msteams @openclaw/googlechat @openclaw/brave-plugin"
 # `openclaw plugins install` takes ONE package per invocation, so loop. Refresh
 # the registry first so version resolution against the fresh seed state dir works.
 # set -e makes any plugin install failure fail the build, so a shipped image

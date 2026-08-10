@@ -476,6 +476,13 @@ const seededDefaults = {
   gateway: {
     mode: 'local',
   },
+  agents: {
+    defaults: {
+      // Match the Control UI's 16 MiB per-file upload cap so any PDF a user
+      // can upload can also be analyzed (upstream pdf tool default is 10 MB).
+      pdfMaxMb: 16,
+    },
+  },
   plugins: {
     entries: {
       // The bundled `webhooks` plugin ships in the OpenClaw image; enable it so
@@ -519,6 +526,23 @@ if (process.env.OPENCLAW_BROWSER_ENABLED !== undefined && process.env.OPENCLAW_B
   config.plugins.entries.browser = config.plugins.entries.browser || {};
   config.plugins.entries.browser.enabled = browserOn;
   console.log('[amazeeai-config] Enforced browser tool ' + (browserOn ? 'ENABLED' : 'DISABLED') + ' (OPENCLAW_BROWSER_ENABLED=' + process.env.OPENCLAW_BROWSER_ENABLED + ')');
+}
+
+// Product knob: Brave web_search. Activates when BRAVE_API_KEY is present on
+// the environment (set via MOAD/Polydock -> Lagoon env var). The plugin code
+// is baked into the image seed (DEFAULT_PLUGINS), and OpenClaw reads
+// BRAVE_API_KEY from the environment directly, so the secret is never written
+// into openclaw.json. When the key is absent we leave the plugin state alone
+// (a user's own Control-UI brave setup keeps working).
+if (process.env.BRAVE_API_KEY) {
+  config.plugins = config.plugins || {};
+  config.plugins.entries = config.plugins.entries || {};
+  config.plugins.entries.brave = config.plugins.entries.brave || {};
+  config.plugins.entries.brave.enabled = true;
+  config.tools.web = config.tools.web || {};
+  config.tools.web.search = config.tools.web.search || {};
+  config.tools.web.search.provider = 'brave';
+  console.log('[amazeeai-config] Enabled Brave web_search (BRAVE_API_KEY present)');
 }
 
 if (!config.gateway.port) {
