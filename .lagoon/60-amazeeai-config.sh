@@ -504,6 +504,23 @@ const seededDefaults = {
 deepFillDefaults(config, seededDefaults);
 console.log('[amazeeai-config] Applied minimal platform defaults (webhooks plugin enabled by default)');
 
+// Product knob: web browsing (the bundled `browser` tool + Chromium) per
+// instance. Only ENFORCED when the env var is set — a product/tier decision
+// made in Polydock/Lagoon; when unset, OpenClaw defaults (enabled) and any
+// user Control-UI choice stay untouched. Both the plugin and browser.enabled
+// are set: the plugin gates the CLI/gateway method/tool as one unit, and
+// browser.enabled gates the feature for a replacement plugin.
+if (process.env.OPENCLAW_BROWSER_ENABLED !== undefined && process.env.OPENCLAW_BROWSER_ENABLED !== '') {
+  const browserOn = !['false', '0', 'off', 'no'].includes(process.env.OPENCLAW_BROWSER_ENABLED.toLowerCase());
+  config.browser = config.browser || {};
+  config.browser.enabled = browserOn;
+  config.plugins = config.plugins || {};
+  config.plugins.entries = config.plugins.entries || {};
+  config.plugins.entries.browser = config.plugins.entries.browser || {};
+  config.plugins.entries.browser.enabled = browserOn;
+  console.log('[amazeeai-config] Enforced browser tool ' + (browserOn ? 'ENABLED' : 'DISABLED') + ' (OPENCLAW_BROWSER_ENABLED=' + process.env.OPENCLAW_BROWSER_ENABLED + ')');
+}
+
 if (!config.gateway.port) {
   config.gateway.port = gatewayPort;
 }
