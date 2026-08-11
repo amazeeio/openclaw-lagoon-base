@@ -1066,6 +1066,14 @@ async function main() {
   ensureBundledSkillFiles();
   const bootstrapExtraFiles = getBundledBootstrapExtraFiles(bundledWorkspacePaths);
   await discoverModels();
+  // discoverModels sets timeoutSeconds only when discovery succeeds; a provider
+  // entry written by an older image or carried through a failed discovery can
+  // lack it, leaving the too-tight upstream LLM timeout. Fill-if-absent so a
+  // user's own value survives.
+  if (config.models.providers.amazeeai && config.models.providers.amazeeai.timeoutSeconds === undefined) {
+    config.models.providers.amazeeai.timeoutSeconds = parseInt(process.env.AMAZEEAI_TIMEOUT_SECONDS, 10) || 600;
+    console.log('[amazeeai-config] Set missing provider timeoutSeconds to', config.models.providers.amazeeai.timeoutSeconds);
+  }
   configureMemorySearchRemoteFromAmazeeai();
   configureGatewayToken();
   configureChannels();

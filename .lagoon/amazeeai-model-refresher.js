@@ -192,12 +192,20 @@ async function runRefresh() {
     const existingModelIds = existingModels.map(m => m.id).sort().join(',');
     const newModelIds = models.map(m => m.id).sort().join(',');
 
-    if (existingModelIds === newModelIds) {
+    // Hosted claws run long tool-use turns; the upstream default LLM timeout is
+    // too tight and users cannot ssh in to tune it. Boot (60-amazeeai-config.sh)
+    // sets this on discovery, but providers written by older images or by this
+    // refresher itself lack it — heal it here too (fill-if-absent so a user's
+    // own value is never overwritten).
+    const timeoutSeconds = parseInt(process.env.AMAZEEAI_TIMEOUT_SECONDS, 10) || 600;
+    const timeoutMissing = config.models?.providers?.amazeeai?.timeoutSeconds === undefined;
+
+    if (existingModelIds === newModelIds && !timeoutMissing) {
       console.log('[amazeeai-refresher] Models are up to date. No config change required.');
       return true;
     }
 
-    console.log('[amazeeai-refresher] Models changed! Refreshing ' + models.length + ' model(s) in openclaw.json');
+    console.log('[amazeeai-refresher] ' + (existingModelIds === newModelIds ? 'Healing provider config' : 'Models changed!') + ' Refreshing ' + models.length + ' model(s) in openclaw.json');
 
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
@@ -205,6 +213,10 @@ async function runRefresh() {
     config.models.providers.amazeeai.baseUrl = cleanBaseUrl;
     config.models.providers.amazeeai.api = 'openai-completions';
     config.models.providers.amazeeai.models = models;
+    if (config.models.providers.amazeeai.timeoutSeconds === undefined) {
+      config.models.providers.amazeeai.timeoutSeconds = timeoutSeconds;
+      console.log('[amazeeai-refresher] Set missing provider timeoutSeconds to ' + timeoutSeconds);
+    }
     if (apiKey) {
       config.models.providers.amazeeai.apiKey = apiKey;
     }
