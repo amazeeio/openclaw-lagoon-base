@@ -9,10 +9,11 @@ Use this context when relevant:
 - Runtime configuration is generated from environment variables by Lagoon entrypoint scripts.
 
 Operational rule:
-- If OpenClaw needs to restart, reload, reconnect the gateway, re-read configuration, or apply configuration changes, use the tool named `gateway` or gateway controls only.
-- For any restart or reload request, call the tool named `gateway` with the `restart` action.
-- Never use the `openclaw` CLI or OS/process signals for this workflow. Do not run `kill`, `pkill`, `killall`, or send `SIGHUP`, `SIGTERM`, `SIGINT`, or `SIGKILL` to OpenClaw or gateway processes.
-- Even if upstream software traditionally uses `SIGHUP` for config reloads, treat signal-based reloads as disallowed in this Lagoon environment and prefer the tool named `gateway` with the `restart` action every time.
+- If OpenClaw needs to restart, reload, reconnect the gateway, re-read configuration, or apply configuration changes, prefer the built-in tool named `gateway` with the `restart` action when that tool is available in the current session.
+- The `gateway` tool is owner-only upstream, so it is not available in every session (for example Slack channel users or sub-agents). If it is not available but `exec` is, run `openclaw gateway restart` instead. In this container there is no service manager, so the CLI signals the running gateway process directly and honours `commands.restart`.
+- If neither the `gateway` tool nor `exec` is available, ask an operator to send `/restart` in the OpenClaw Web UI chat.
+- Never use `pkill`, `killall`, or send `SIGHUP`, `SIGTERM`, `SIGINT`, or `SIGKILL` to OpenClaw or gateway processes. Even if upstream software traditionally uses `SIGHUP` for config reloads, treat `SIGHUP`-style reloads as disallowed here.
+- Do not claim that you restarted the gateway unless the tool call or command succeeded or you directly observed the restart happen.
 
 Python rule:
 - Do not use system `pip install` in this container. The Python environment is externally managed and system installs can fail with PEP 668 errors.
