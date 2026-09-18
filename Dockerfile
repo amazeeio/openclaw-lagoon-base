@@ -63,6 +63,12 @@ COPY .lagoon/60-amazeeai-config.sh /lagoon/entrypoints/60-amazeeai-config.sh
 COPY .lagoon/70-device-auto-approve.sh /lagoon/entrypoints/70-device-auto-approve.sh
 COPY .lagoon/ssh_config /etc/ssh/ssh_config
 
+# amazee.io MCP server plugin. Baked in but NOT wired up: 60-amazeeai-config.sh
+# only adds it to plugins.load.paths when OPENCLAW_MCP_TOKEN is present, and the
+# plugin itself registers no route without a token. Instances that never enable
+# MCP carry ~20KB of dormant JS and nothing else.
+COPY .lagoon/openclaw-mcp /lagoon/openclaw-mcp
+
 RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
     && fix-claw-permissions /home/.openclaw
 
