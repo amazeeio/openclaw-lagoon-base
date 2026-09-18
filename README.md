@@ -24,6 +24,7 @@ This repo is the source of truth for:
 - amazee.ai model discovery and runtime config generation
 - Shell prompt configuration and dashboard URL helpers
 - Bundled runtime customizations copied into OpenClaw bootstrap and managed skill locations
+- The amazee.io MCP server plugin that turns an instance into a remote MCP server
 
 Downstream repos should not duplicate these files.
 
@@ -134,6 +135,38 @@ The image expects the same environment variables currently used by OpenClaw Lago
 - `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` for Slack integration
 
 Runtime state is stored under `/home/.openclaw`.
+
+## MCP server
+
+The instance can act as a **remote MCP server**, so other people's MCP clients (Claude Code, Cursor, ...) can talk to this instance's agent. It is **off unless an env var turns it on**, which makes it a per-instance product decision that Polydock (or MOAD, through Polydock) injects as a Lagoon project variable.
+
+| Variable | Meaning |
+|---|---|
+| `OPENCLAW_MCP_TOKEN` | Single consumer token. Presence of this (or `OPENCLAW_MCP_TOKENS`) is what enables the feature. |
+| `OPENCLAW_MCP_TOKENS` | `name:token,name2:token2` when several consumers should connect with their own revocable tokens. |
+| `OPENCLAW_MCP_PATH` | Endpoint path, default `/mcp`. |
+
+With a token set, the endpoint is `https://<your-instance>/mcp`:
+
+```bash
+claude mcp add --transport http myclaw https://<your-instance>/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Two tools are exposed:
+
+- `ask(prompt)` — submits the prompt to this instance's agent and returns `{ task_id, status: "running" }` **immediately**. Agent turns routinely outlive an ingress idle timeout, so the HTTP request never waits for one.
+- `result(task_id, wait_ms?)` — long-polls up to `wait_ms` (default 2s, max 30s) and returns `running`, `done` with the answer text, or `error`.
+
+Each token is a separate consumer: it gets its own agent session (`agent:<agent>:subagent:mcp-<client>`), so transcripts and context do not bleed between them, and one token can be revoked without touching the others. Tokens are read from the environment and are **never written into `openclaw.json`** — same rule as `BRAVE_API_KEY`.
+
+The plugin lives in `.lagoon/openclaw-mcp/` and is baked into the image at `/lagoon/openclaw-mcp`. It is only added to `plugins.load.paths` while the knob is on, and registers no HTTP route without a token, so instances that never enable MCP are unaffected. Run its self-check with:
+
+```bash
+node --test .lagoon/openclaw-mcp/mcp.test.mjs
+```
+
+> The MCP token is **not** the gateway token, deliberately: the gateway token owns the Control UI on the same hostname. Treat an MCP token as high-value anyway — a holder can start agent runs on this instance.
 
 ## Bundled customizations
 

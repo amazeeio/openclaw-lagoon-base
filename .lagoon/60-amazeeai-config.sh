@@ -545,6 +545,50 @@ if (process.env.BRAVE_API_KEY) {
   console.log('[amazeeai-config] Enabled Brave web_search (BRAVE_API_KEY present)');
 }
 
+// Product knob: MCP server. Makes this instance an MCP server other people's
+// MCP clients connect to, on the gateway's existing HTTP port under /mcp.
+// Activates when OPENCLAW_MCP_TOKEN (or OPENCLAW_MCP_TOKENS, "name:token,...")
+// is present on the environment -- Polydock/MOAD set it as a Lagoon project
+// variable, so this is a per-instance product decision.
+//
+// The plugin code is baked into the image at /lagoon/openclaw-mcp but stays
+// invisible to OpenClaw until we add that load path here, and it reads the
+// consumer tokens straight from the environment, so no consumer secret is ever
+// written into openclaw.json (same rule as BRAVE_API_KEY above).
+const MCP_PLUGIN_DIR = '/lagoon/openclaw-mcp';
+const MCP_PLUGIN_ID = 'amazeeio-mcp';
+const mcpEnabled = Boolean(
+  String(process.env.OPENCLAW_MCP_TOKEN || '').trim() ||
+  String(process.env.OPENCLAW_MCP_TOKENS || '').trim()
+);
+config.plugins = config.plugins || {};
+config.plugins.entries = config.plugins.entries || {};
+const mcpExistingPaths = Array.isArray(config.plugins.load && config.plugins.load.paths)
+  ? config.plugins.load.paths
+  : [];
+const mcpOtherPaths = mcpExistingPaths.filter((entry) => entry !== MCP_PLUGIN_DIR);
+const mcpNextPaths = mcpEnabled ? [...mcpOtherPaths, MCP_PLUGIN_DIR] : mcpOtherPaths;
+if (mcpNextPaths.length) {
+  config.plugins.load = config.plugins.load || {};
+  config.plugins.load.paths = mcpNextPaths;
+} else if (config.plugins.load) {
+  // Never leave `paths: []` behind on instances that never had a load path.
+  delete config.plugins.load.paths;
+  if (Object.keys(config.plugins.load).length === 0) delete config.plugins.load;
+}
+if (mcpEnabled) {
+  config.plugins.entries[MCP_PLUGIN_ID] = Object.assign(
+    {}, config.plugins.entries[MCP_PLUGIN_ID], { enabled: true }
+  );
+  console.log('[amazeeai-config] Enabled MCP server on /mcp (OPENCLAW_MCP_TOKEN present)');
+} else if (config.plugins.entries[MCP_PLUGIN_ID]) {
+  // Knob cleared in Polydock: take the endpoint away on this deploy. The plugin
+  // also refuses to register a route without a token, so this is belt and braces
+  // -- but it keeps the Control UI's plugin list honest about what is running.
+  config.plugins.entries[MCP_PLUGIN_ID].enabled = false;
+  console.log('[amazeeai-config] Disabled MCP server (no OPENCLAW_MCP_TOKEN/OPENCLAW_MCP_TOKENS)');
+}
+
 if (!config.gateway.port) {
   config.gateway.port = gatewayPort;
 }

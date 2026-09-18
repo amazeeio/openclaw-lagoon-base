@@ -1,0 +1,12 @@
+{
+  "id": "amazeeio-mcp",
+  "name": "amazee.io MCP server",
+  "description": "Exposes this OpenClaw instance as a remote MCP server over HTTP.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}
