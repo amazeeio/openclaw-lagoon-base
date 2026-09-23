@@ -54,6 +54,8 @@ COPY .lagoon/fix-claw-permissions /bin/fix-claw-permissions
 RUN chmod +x /bin/fix-permissions /bin/fix-claw-permissions /lagoon/entrypoints.sh /lagoon/polydock_claim.sh /lagoon/polydock_post_deploy.sh && \
     fix-permissions /home
 
+COPY .lagoon/00-gateway-port-proxy.sh /lagoon/entrypoints/00-gateway-port-proxy.sh
+COPY .lagoon/gateway-port-proxy.js /lagoon/gateway-port-proxy.js
 COPY .lagoon/05-ssh-key.sh /lagoon/entrypoints/05-ssh-key.sh
 COPY .lagoon/10-passwd.sh /lagoon/entrypoints/10-passwd.sh
 COPY .lagoon/50-shell-config.sh /lagoon/entrypoints/50-shell-config.sh
@@ -75,7 +77,8 @@ RUN mkdir -p /home/.openclaw /home/.openclaw/npm \
 ENV NODE_ENV=production \
     NODE_OPTIONS="--require /lagoon/openclaw-patch.js --max-old-space-size=3072" \
     HOME=/home \
-    OPENCLAW_GATEWAY_PORT=3000 \
+    # Gateway listens here; the Lagoon service port 3000 is held by gateway-port-proxy.js.
+    OPENCLAW_GATEWAY_PORT=3001 \
     OPENCLAW_NO_RESPAWN=1 \
     OPENCLAW_NO_AUTO_UPDATE=1 \
     XDG_DATA_HOME=/home/.openclaw/.local/share/ \
