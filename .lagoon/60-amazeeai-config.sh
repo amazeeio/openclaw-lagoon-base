@@ -1265,6 +1265,59 @@ if [ -n "${OPENCLAW_EXTRA_PLUGINS:-}" ]; then
   ( install_extra_plugins ) >/home/.openclaw/plugin-maintenance.log 2>&1 &
 fi
 
+# ============================================================
+# Agent database hygiene (runs before doctor and before the gateway opens the DBs)
+#
+# 1. Doctor copies the whole agent DB (~1GB on busy claws) before every repair or
+#    migration and never prunes those copies; a handful of boots filled a 5GB
+#    volume ("database or disk is full"). Keep only the newest copy per DB.
+# 2. Rows the current runtime cannot repair itself, seen after multi-version
+#    hops on restored volumes:
+#    - transcript_event_identities rows whose transcript_events row is gone.
+#      doctor then SKIPS the whole agent DB migration (foreign_key_check fails)
+#      and the gateway runs with sessions unavailable. They are index rows with
+#      no content, so deleting them loses nothing.
+#    - session_nodes with entry_valid = 0 that are NOT queued in
+#      session_canonical_validation_pending, i.e. the gateway already validated
+#      and rejected them (every entry write resets entry_valid to 0 and queues
+#      the row, so a queued 0 is just "not validated yet" and is left alone).
+#      The gateway refuses to start on these ("invalid persisted session row
+#      requires repair") and `doctor --fix` does not repair them. Only cron-run sessions are removed
+#      automatically (their run history is lost, the cron job definitions are
+#      not); anything else is left alone and logged for manual repair.
+# Every step is best-effort: a missing table or sqlite error never blocks boot.
+# ============================================================
+maintain_agent_databases() {
+  command -v sqlite3 >/dev/null 2>&1 || return 0
+  for db in /home/.openclaw/agents/*/agent/openclaw-agent.sqlite; do
+    [ -f "$db" ] || continue
+
+    ls -t "$db".*bak* "$db".*backup* 2>/dev/null | awk '!seen[$0]++' | tail -n +2 | while read -r old; do
+      echo "[amazeeai-config] Removing stale agent DB backup $old"
+      rm -f "$old"
+    done
+
+    orphans=$(sqlite3 -cmd ".timeout 15000" "$db" "select count(*) from transcript_event_identities i where not exists (select 1 from transcript_events e where e.session_id = i.session_id and e.seq = i.seq);" 2>/dev/null)
+    if [ "${orphans:-0}" -gt 0 ] 2>/dev/null; then
+      echo "[amazeeai-config] Removing $orphans orphaned transcript_event_identities rows from $db (they block doctor's agent DB migration)"
+      sqlite3 -cmd ".timeout 15000" "$db" "delete from transcript_event_identities where not exists (select 1 from transcript_events e where e.session_id = transcript_event_identities.session_id and e.seq = transcript_event_identities.seq);" || true
+    fi
+
+    cron_invalid=$(sqlite3 -cmd ".timeout 15000" "$db" "select count(*) from session_nodes where entry_valid = 0 and session_key like 'agent:%:cron:%' and session_key not in (select session_key from session_canonical_validation_pending);" 2>/dev/null)
+    if [ "${cron_invalid:-0}" -gt 0 ] 2>/dev/null; then
+      echo "[amazeeai-config] Removing $cron_invalid unreadable cron-run session rows from $db (the gateway refuses to start on them; cron job definitions are kept)"
+      sqlite3 -cmd ".timeout 15000" "$db" "pragma foreign_keys = on; delete from session_nodes where entry_valid = 0 and session_key like 'agent:%:cron:%' and session_key not in (select session_key from session_canonical_validation_pending);" || true
+    fi
+
+    other_invalid=$(sqlite3 -cmd ".timeout 15000" "$db" "select count(*) from session_nodes where entry_valid = 0 and session_key not in (select session_key from session_canonical_validation_pending);" 2>/dev/null)
+    if [ "${other_invalid:-0}" -gt 0 ] 2>/dev/null; then
+      echo "[amazeeai-config] WARNING: $other_invalid unreadable non-cron session rows in $db; left in place, the gateway may refuse to start until they are repaired by hand"
+    fi
+  done
+}
+
+maintain_agent_databases
+
 # beta.7+ blocks every agent run while a legacy exec-approvals.json exists.
 # The node block flags a leftover file (it no longer writes one on those
 # runtimes); doctor migrates it into the state DB and deletes it. Must run
