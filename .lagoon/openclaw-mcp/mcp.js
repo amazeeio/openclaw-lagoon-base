@@ -25,14 +25,16 @@ export const TOOLS = [
   {
     name: "ask",
     description:
-      "Ask this OpenClaw instance's agent a question. Returns a task id immediately without " +
-      "waiting for the agent; poll `result` with that id to collect the answer.",
+      "Send a message to this OpenClaw instance's agent, which runs with its own workspace and tools. " +
+      'Returns `{task_id, status: "running"}` immediately; collect the answer with `result`. ' +
+      "Each client has one continuous conversation with the agent, so later asks can refer to earlier ones. " +
+      "Only one task per client can be open at a time: `ask` fails until the previous task has been collected with `result`.",
     inputSchema: {
       type: "object",
       properties: {
         prompt: {
           type: "string",
-          description: "What to ask the agent.",
+          description: "The message for the agent. It can't see your conversation, so include any context it needs.",
         },
       },
       required: ["prompt"],
@@ -42,8 +44,10 @@ export const TOOLS = [
   {
     name: "result",
     description:
-      "Collect the answer for a task id returned by `ask`. Long-polls up to wait_ms and " +
-      "reports status `running` if the agent has not finished yet.",
+      "Collect the answer for a task id returned by `ask`. Long-polls up to wait_ms, then returns one of: " +
+      '`{status: "running"}` (call again), `{status: "done", text}` with the agent\'s final reply, or ' +
+      '`{status: "error", error}`. A finished task is removed once returned, so a second call for it fails ' +
+      "with an unknown task_id; tasks also expire 30 minutes after `ask`.",
     inputSchema: {
       type: "object",
       properties: {
