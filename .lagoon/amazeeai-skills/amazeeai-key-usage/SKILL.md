@@ -5,13 +5,6 @@ description: "Use when the user asks about the configured amazee.ai key budget, 
 
 # amazee.ai Key Usage
 
-Use this skill when the user asks questions such as:
-
-- What is my amazee.ai budget?
-- How much has this key spent?
-- When does the amazee.ai key reset?
-- Which key is currently active for amazee.ai?
-
 ## Resolve the active key
 
 Determine the currently active amazee.ai provider base URL and API key from OpenClaw configuration first.
@@ -28,8 +21,6 @@ To inspect the currently configured key itself, call LiteLLM `GET /key/info` aga
 
 - For self-inspection, do not pass the `key` query parameter unless you explicitly need to inspect a different key.
 - LiteLLM will use the key from the authorization header when `key` is omitted.
-- Preferred request shape for the active key is effectively: `GET {baseUrl}/key/info` with `Authorization: Bearer <active_amazeeai_key>`.
-
 ## Summarize the result
 
 Use these fields to answer the user:
@@ -42,6 +33,6 @@ Use these fields to answer the user:
 - `team_id`, `user_id`, `project_id`, or `organization_id`: ownership context, if present and useful.
 - `litellm_budget_table`: fallback location for budget metadata if some budget fields are nested instead of top-level.
 
-If the user asks a direct question like "what is my amazee AI budget?", "how much has this key spent?", or "when does the amazee AI key reset?", prefer summarizing the active key info from `/key/info` instead of giving generic setup guidance.
+Answer budget, spend and reset questions from the active key's `/key/info` rather than with generic setup guidance.
 
 If the user asks for more detailed usage history rather than the current summary, you may additionally use LiteLLM spend endpoints such as `/spend/logs/v2` or `/global/spend/report`, but `/key/info` should be the first source for current key budget status.
