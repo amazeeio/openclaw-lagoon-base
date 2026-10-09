@@ -1303,32 +1303,52 @@ fi
 #      not); anything else is left alone and logged for manual repair.
 # Every step is best-effort: a missing table or sqlite error never blocks boot.
 # ============================================================
+# A container that died within seconds of this step on every boot (crash-loop
+# at the 5-minute back-off cap, 7.2 -> 9.9 upgrade) is consistent with an OOM:
+# with cgroup v2 an OOM kills the whole container, not just sqlite3. So each
+# query gets a small page cache, on-disk temp storage and a time limit;
+# a killed or timed-out query rolls back and boot carries on. Each step is
+# logged so a remaining failure shows where. Escape hatch for an instance that
+# still dies here: OPENCLAW_SKIP_AGENT_DB_MAINTENANCE=true.
+agent_db_sql() {
+  timeout "${AGENT_DB_SQL_TIMEOUT:-120}" sqlite3 -cmd ".timeout 15000" \
+    -cmd "pragma cache_size = -16000" -cmd "pragma temp_store = file" "$@"
+}
+
 maintain_agent_databases() {
   command -v sqlite3 >/dev/null 2>&1 || return 0
+  if [ "${OPENCLAW_SKIP_AGENT_DB_MAINTENANCE:-}" = "true" ]; then
+    echo "[amazeeai-config] OPENCLAW_SKIP_AGENT_DB_MAINTENANCE=true; skipping agent database maintenance"
+    return 0
+  fi
   for db in /home/.openclaw/agents/*/agent/openclaw-agent.sqlite; do
     [ -f "$db" ] || continue
+    echo "[amazeeai-config] Agent DB maintenance: $db ($(du -sh "$db" "$db-wal" 2>/dev/null | awk '{print $1}' | paste -sd+ -) on disk, $(df -h /home/.openclaw | awk 'NR==2{print $4}') free, memory limit $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unknown))"
 
     ls -t "$db".*bak* "$db".*backup* 2>/dev/null | awk '!seen[$0]++' | tail -n +2 | while read -r old; do
       echo "[amazeeai-config] Removing stale agent DB backup $old"
       rm -f "$old"
     done
 
-    orphans=$(sqlite3 -cmd ".timeout 15000" "$db" "select count(*) from transcript_event_identities i where not exists (select 1 from transcript_events e where e.session_id = i.session_id and e.seq = i.seq);" 2>/dev/null)
+    echo "[amazeeai-config] Agent DB maintenance: checking orphaned transcript_event_identities rows"
+    orphans=$(agent_db_sql "$db" "select count(*) from transcript_event_identities i where not exists (select 1 from transcript_events e where e.session_id = i.session_id and e.seq = i.seq);" 2>/dev/null)
     if [ "${orphans:-0}" -gt 0 ] 2>/dev/null; then
       echo "[amazeeai-config] Removing $orphans orphaned transcript_event_identities rows from $db (they block doctor's agent DB migration)"
-      sqlite3 -cmd ".timeout 15000" "$db" "delete from transcript_event_identities where not exists (select 1 from transcript_events e where e.session_id = transcript_event_identities.session_id and e.seq = transcript_event_identities.seq);" || true
+      agent_db_sql "$db" "delete from transcript_event_identities where not exists (select 1 from transcript_events e where e.session_id = transcript_event_identities.session_id and e.seq = transcript_event_identities.seq);" || true
     fi
 
-    cron_invalid=$(sqlite3 -cmd ".timeout 15000" "$db" "select count(*) from session_nodes where entry_valid = 0 and session_key like 'agent:%:cron:%' and session_key not in (select session_key from session_canonical_validation_pending);" 2>/dev/null)
+    echo "[amazeeai-config] Agent DB maintenance: checking unreadable session rows"
+    cron_invalid=$(agent_db_sql "$db" "select count(*) from session_nodes where entry_valid = 0 and session_key like 'agent:%:cron:%' and session_key not in (select session_key from session_canonical_validation_pending);" 2>/dev/null)
     if [ "${cron_invalid:-0}" -gt 0 ] 2>/dev/null; then
       echo "[amazeeai-config] Removing $cron_invalid unreadable cron-run session rows from $db (the gateway refuses to start on them; cron job definitions are kept)"
-      sqlite3 -cmd ".timeout 15000" "$db" "pragma foreign_keys = on; delete from session_nodes where entry_valid = 0 and session_key like 'agent:%:cron:%' and session_key not in (select session_key from session_canonical_validation_pending);" || true
+      agent_db_sql "$db" "pragma foreign_keys = on; delete from session_nodes where entry_valid = 0 and session_key like 'agent:%:cron:%' and session_key not in (select session_key from session_canonical_validation_pending);" || true
     fi
 
-    other_invalid=$(sqlite3 -cmd ".timeout 15000" "$db" "select count(*) from session_nodes where entry_valid = 0 and session_key not in (select session_key from session_canonical_validation_pending);" 2>/dev/null)
+    other_invalid=$(agent_db_sql "$db" "select count(*) from session_nodes where entry_valid = 0 and session_key not in (select session_key from session_canonical_validation_pending);" 2>/dev/null)
     if [ "${other_invalid:-0}" -gt 0 ] 2>/dev/null; then
       echo "[amazeeai-config] WARNING: $other_invalid unreadable non-cron session rows in $db; left in place, the gateway may refuse to start until they are repaired by hand"
     fi
+    echo "[amazeeai-config] Agent DB maintenance: done for $db"
   done
 }
 
