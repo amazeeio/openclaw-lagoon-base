@@ -666,6 +666,25 @@ console.log('[amazeeai-config] Set gateway.controlUi.allowedOrigins to:', config
 // ============================================================
 // AMAZEEAI MODEL DISCOVERY
 // ============================================================
+// OpenClaw resets a session's /model pick once it leaves the allowlist, but not
+// fallbacks or per-agent models: drop retired amazeeai refs there so a retired
+// per-agent model inherits the default primary instead. Kept in sync with
+// amazeeai-model-refresher.js.
+function pruneRetiredModelRefs(config, modelIds, tag) {
+  const retired = ref => typeof ref === 'string' && ref.startsWith('amazeeai/') && !modelIds.includes(ref.slice('amazeeai/'.length));
+  const owners = [['agents.defaults', config.agents.defaults], ...(Array.isArray(config.agents.list) ? config.agents.list.map(a => [`agent ${a?.id}`, a]) : [])];
+  for (const [label, owner] of owners) {
+    const model = owner?.model;
+    if (retired(model) || retired(model?.primary)) {
+      console.log(tag, `Removed retired model from ${label}; it now uses the default primary`);
+      delete owner.model;
+    } else if (Array.isArray(model?.fallbacks) && model.fallbacks.some(retired)) {
+      model.fallbacks = model.fallbacks.filter(ref => !retired(ref));
+      console.log(tag, `Removed retired fallback model(s) from ${label}`);
+    }
+  }
+}
+
 async function discoverModels() {
   const baseUrl = (process.env.AMAZEEAI_BASE_URL || '').replace(/\/+$/, '');
   const apiKey = process.env.AMAZEEAI_API_KEY || '';
@@ -862,32 +881,29 @@ async function discoverModels() {
     config.models.providers.amazeeai = providerConfig;
     console.log('[amazeeai-config] Added amazeeai provider with', models.length, 'models (timeoutSeconds=' + providerConfig.timeoutSeconds + ')');
 
+    // Rebuilt so retired models drop out; per-model settings (alias, params) on
+    // models that are still served are kept.
+    const previousAllowlist = config.agents.defaults.models || {};
     const discoveredAllowlist = {};
     for (const model of models) {
-      discoveredAllowlist[`amazeeai/${model.id}`] = {};
+      const key = `amazeeai/${model.id}`;
+      discoveredAllowlist[key] = previousAllowlist[key] || {};
     }
     config.agents.defaults.models = discoveredAllowlist;
 
+    // Keep the user's primary model while amazee.ai still serves it; only a
+    // missing or retired one falls back (AMAZEEAI_DEFAULT_MODEL, then the
+    // `chat` alias every region serves, then the first discovered model).
     const modelIds = models.map(m => m.id);
-    if (defaultModel) {
-      const requestedPrimaryModel = `amazeeai/${defaultModel}`;
-      if (modelIds.includes(defaultModel)) {
-        config.agents.defaults.model.primary = requestedPrimaryModel;
-        console.log('[amazeeai-config] Set default primary model from AMAZEEAI_DEFAULT_MODEL:', requestedPrimaryModel);
-      } else {
-        console.warn(`[amazeeai-config] Warning: AMAZEEAI_DEFAULT_MODEL "${defaultModel}" not found in discovered models`);
-        console.warn('[amazeeai-config] Available models:', modelIds.join(', '));
-        if (modelIds.length > 0) {
-          config.agents.defaults.model.primary = `amazeeai/${modelIds[0]}`;
-          console.log('[amazeeai-config] Falling back to first discovered model:', config.agents.defaults.model.primary);
-        }
-      }
-    } else if (modelIds.length > 0) {
-      config.agents.defaults.model.primary = `amazeeai/${modelIds[0]}`;
-      console.log('[amazeeai-config] No AMAZEEAI_DEFAULT_MODEL set; defaulting to first discovered model:', config.agents.defaults.model.primary);
+    const currentPrimary = config.agents.defaults.model.primary || '';
+    if (currentPrimary.startsWith('amazeeai/') && modelIds.includes(currentPrimary.slice('amazeeai/'.length))) {
+      console.log('[amazeeai-config] Keeping primary model:', currentPrimary);
     } else {
-      console.log('[amazeeai-config] No AMAZEEAI_DEFAULT_MODEL set and no models discovered; leaving default model config unchanged');
+      const fallbackId = [defaultModel, 'chat'].find(id => id && modelIds.includes(id)) || modelIds[0];
+      config.agents.defaults.model.primary = `amazeeai/${fallbackId}`;
+      console.log('[amazeeai-config] Primary model', currentPrimary ? `"${currentPrimary}" is unavailable;` : 'unset;', 'using', config.agents.defaults.model.primary);
     }
+    pruneRetiredModelRefs(config, modelIds, '[amazeeai-config]');
   } catch (error) {
     console.error('[amazeeai-config] Model discovery failed:', error.message);
   }
