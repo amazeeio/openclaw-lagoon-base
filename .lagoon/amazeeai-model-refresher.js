@@ -168,6 +168,25 @@ function sanitizeModelInputs(models) {
   }
 }
 
+// OpenClaw resets a session's /model pick once it leaves the allowlist, but not
+// fallbacks or per-agent models: drop retired amazeeai refs there so a retired
+// per-agent model inherits the default primary instead. Kept in sync with
+// pruneRetiredModelRefs in 60-amazeeai-config.sh.
+function pruneRetiredModelRefs(config, modelIds) {
+  const retired = ref => typeof ref === 'string' && ref.startsWith('amazeeai/') && !modelIds.includes(ref.slice('amazeeai/'.length));
+  const owners = [['agents.defaults', config.agents.defaults], ...(Array.isArray(config.agents.list) ? config.agents.list.map(a => ['agent ' + a?.id, a]) : [])];
+  for (const [label, owner] of owners) {
+    const model = owner?.model;
+    if (retired(model) || retired(model?.primary)) {
+      console.log('[amazeeai-refresher] Removed retired model from ' + label + '; it now uses the default primary');
+      delete owner.model;
+    } else if (Array.isArray(model?.fallbacks) && model.fallbacks.some(retired)) {
+      model.fallbacks = model.fallbacks.filter(ref => !retired(ref));
+      console.log('[amazeeai-refresher] Removed retired fallback model(s) from ' + label);
+    }
+  }
+}
+
 async function runRefresh() {
   try {
     const models = await fetchModels();
@@ -224,9 +243,12 @@ async function runRefresh() {
     config.agents = config.agents || {};
     config.agents.defaults = config.agents.defaults || {};
 
+    // Retired models drop out; settings on still-served models are kept.
+    const previousAllowlist = config.agents.defaults.models || {};
     const discoveredAllowlist = {};
     for (const model of models) {
-      discoveredAllowlist['amazeeai/' + model.id] = {};
+      const key = 'amazeeai/' + model.id;
+      discoveredAllowlist[key] = previousAllowlist[key] || {};
     }
     config.agents.defaults.models = discoveredAllowlist;
 
@@ -240,13 +262,14 @@ async function runRefresh() {
     const currentPrimary = config.agents.defaults.model.primary || '';
     const cleanPrimary = currentPrimary.replace('amazeeai/', '');
 
+    // Keep the user's pick while it is still served; a retired one falls back to
+    // AMAZEEAI_DEFAULT_MODEL, then the `chat` alias every region serves.
     if (!currentPrimary || !currentPrimary.startsWith('amazeeai/') || !modelIds.includes(cleanPrimary)) {
-      if (defaultModel && modelIds.includes(defaultModel)) {
-        config.agents.defaults.model.primary = 'amazeeai/' + defaultModel;
-      } else if (modelIds.length > 0) {
-        config.agents.defaults.model.primary = 'amazeeai/' + modelIds[0];
-      }
+      const fallbackId = [defaultModel, 'chat'].find(id => id && modelIds.includes(id)) || modelIds[0];
+      config.agents.defaults.model.primary = 'amazeeai/' + fallbackId;
+      console.log('[amazeeai-refresher] Primary model "' + currentPrimary + '" is unavailable; using ' + config.agents.defaults.model.primary);
     }
+    pruneRetiredModelRefs(config, modelIds);
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
     console.log('[amazeeai-refresher] Config file updated and saved successfully');
