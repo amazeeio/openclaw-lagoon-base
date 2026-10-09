@@ -1384,3 +1384,17 @@ fi
 
 echo "[amazeeai-config] Configuration complete. Starting OpenClaw gateway..."
 echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no output is normal)."
+
+# Re-run model discovery daily inside this container so new amazee.ai models
+# appear and retired ones drop out between deploys; the gateway hot-reloads
+# models/agents from openclaw.json. Not a Lagoon cron: a daily one runs in a
+# separate pod that re-runs these entrypoints against the live state volume.
+# Only when this container is starting the gateway ("$@" is its command).
+case "$*" in
+  *gateway*)
+    if [ -n "$AMAZEEAI_BASE_URL" ] && [ "$AMAZEEAI_DISABLE_BACKGROUND_REFRESH" != "true" ]; then
+      echo "[amazeeai-config] Starting daily amazee.ai model refresh in the background"
+      (while sleep 86400; do node /lagoon/amazeeai-model-refresher.js; done) &
+    fi
+    ;;
+esac
