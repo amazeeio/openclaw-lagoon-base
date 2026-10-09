@@ -87,6 +87,10 @@ const LEGACY_ONLY_CONFIG_KEYS = [ // rejected by the strict schema
   // which cannot be combined with the legacy security/ask pair.
   ['tools', 'exec', 'security'],
   ['tools', 'exec', 'ask'],
+  // Retired tuning knob a 2026.7.x config can carry. 2026.9.9 hard-rejects it
+  // ("Unrecognized key"), and while the config is invalid doctor --fix refuses
+  // to migrate the agent DB, so the gateway never starts.
+  ['cron', 'maxConcurrentRuns'],
 ];
 const STRICT_ONLY_CONFIG_KEYS = [ // written by strict-schema runtimes, rejected by legacy ones
   ['meta', 'migrations'],
