@@ -87,6 +87,10 @@ const LEGACY_ONLY_CONFIG_KEYS = [ // rejected by the strict schema
   // which cannot be combined with the legacy security/ask pair.
   ['tools', 'exec', 'security'],
   ['tools', 'exec', 'ask'],
+  // Retired tuning knob a 2026.7.x config can carry. 2026.9.9 hard-rejects it
+  // ("Unrecognized key"), and while the config is invalid doctor --fix refuses
+  // to migrate the agent DB, so the gateway never starts.
+  ['cron', 'maxConcurrentRuns'],
 ];
 const STRICT_ONLY_CONFIG_KEYS = [ // written by strict-schema runtimes, rejected by legacy ones
   ['meta', 'migrations'],
@@ -1303,13 +1307,10 @@ fi
 #      not); anything else is left alone and logged for manual repair.
 # Every step is best-effort: a missing table or sqlite error never blocks boot.
 # ============================================================
-# A container that died within seconds of this step on every boot (crash-loop
-# at the 5-minute back-off cap, 7.2 -> 9.9 upgrade) is consistent with an OOM:
-# with cgroup v2 an OOM kills the whole container, not just sqlite3. So each
-# query gets a small page cache, on-disk temp storage and a time limit;
-# a killed or timed-out query rolls back and boot carries on. Each step is
-# logged so a remaining failure shows where. Escape hatch for an instance that
-# still dies here: OPENCLAW_SKIP_AGENT_DB_MAINTENANCE=true.
+# Each query gets a small page cache, on-disk temp storage and a time limit so a
+# large agent DB cannot stall or OOM boot; a killed or timed-out query rolls back
+# and boot carries on. Each step is logged so a failure shows where. Escape
+# hatch for an instance that still fails here: OPENCLAW_SKIP_AGENT_DB_MAINTENANCE=true.
 agent_db_sql() {
   timeout "${AGENT_DB_SQL_TIMEOUT:-120}" sqlite3 -cmd ".timeout 15000" \
     -cmd "pragma cache_size = -16000" -cmd "pragma temp_store = file" "$@"

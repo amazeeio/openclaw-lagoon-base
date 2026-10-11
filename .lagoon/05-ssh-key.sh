@@ -1,5 +1,7 @@
 #!/bin/sh
-set -e
+# No `set -e`: entrypoints are sourced into one shell, so it would leak into every
+# later script and turn any failing command (e.g. a sqlite3 query against an
+# older agent DB schema) into a container crash-loop.
 
 mkdir -p /home/.ssh
 
