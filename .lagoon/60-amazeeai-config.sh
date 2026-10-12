@@ -1355,6 +1355,31 @@ maintain_agent_databases() {
 
 maintain_agent_databases
 
+# openclaw doctor --fix, plus recovery of agent stores it holds back.
+# When doctor cannot find the agent deletion journal (seen after state-DB
+# resets and multi-version hops), it holds every agent DB it cannot prove is
+# still wanted and skips their migrations. The gateway then refuses to start
+# ("uses schema version N; run openclaw doctor --fix") and doctor reports
+# "Legacy workspace setup state requires migration" because the refusal stops
+# every later repair. This platform never deletes agents, so a held store is
+# always one the gateway needs: run the restore doctor itself prints
+# ("openclaw agents add <id> ... to abort deletion and restore"), then run
+# doctor again so the skipped migrations finish. Returns doctor's exit status.
+run_doctor_fix() {
+  doctor_out=$(openclaw doctor --fix --yes 2>&1)
+  doctor_rc=$?
+  printf '%s\n' "$doctor_out"
+  restores=$(printf '%s\n' "$doctor_out" | sed -n 's/.*run openclaw agents add \([^ ]*\) --workspace \([^ ]*\) --agent-dir \([^ ]*\) --non-interactive to abort deletion.*/\1 \2 \3/p' | tr -d "'\"" | sort -u)
+  [ -n "$restores" ] || return $doctor_rc
+  printf '%s\n' "$restores" | while read -r agent_id workspace agent_dir; do
+    echo "[amazeeai-config] Restoring agent store doctor held back: $agent_id ($agent_dir)"
+    openclaw agents add "$agent_id" --workspace "$workspace" --agent-dir "$agent_dir" --non-interactive || true
+  done
+  echo "[amazeeai-config] Re-running openclaw doctor --fix after restoring held agent stores..."
+  openclaw doctor --fix --yes 2>&1
+}
+DOCTOR_OK_MARKER=/home/.openclaw/state/.doctor-ok-version
+
 # beta.7+ blocks every agent run while a legacy exec-approvals.json exists.
 # The node block flags a leftover file (it no longer writes one on those
 # runtimes); doctor migrates it into the state DB and deletes it. Must run
@@ -1362,7 +1387,7 @@ maintain_agent_databases
 if [ -f /tmp/.needs-exec-approvals-migration ]; then
   rm -f /tmp/.needs-exec-approvals-migration
   echo "[amazeeai-config] Migrating legacy exec-approvals.json into the state DB (openclaw doctor --fix)..."
-  openclaw doctor --fix --yes 2>/dev/null || openclaw doctor --fix 2>/dev/null || true
+  run_doctor_fix && echo "$CURRENT_VER" > "$DOCTOR_OK_MARKER"
 fi
 
 echo "[amazeeai-config] Enforcing YOLO exec-policy (no approval prompts for tools or scripts)..."
@@ -1390,14 +1415,19 @@ fi
 
 # Only run openclaw doctor --fix if upgrading from an older version or legacy state files exist.
 # Fresh project deployments skip this check completely (0ms overhead).
-if [ "$LEGACY_FILES_FOUND" -eq 1 ] || { [ "$IS_FRESH_INSTALL" -eq 0 ] && [ "$OLD_VER" != "$CURRENT_VER" ]; }; then
-  echo "[amazeeai-config] OpenClaw upgrade/legacy state detected ($OLD_VER -> $CURRENT_VER). Running openclaw doctor --fix..."
-  openclaw doctor --fix --yes 2>/dev/null || openclaw doctor --fix 2>/dev/null || true
-  
-  # Stamp current version into openclaw.json so future restarts skip doctor
-  if [ -f "$configPath" ]; then
-    tmp_cfg=$(mktemp)
-    jq --arg v "$CURRENT_VER" '.meta = (.meta // {}) | .meta.lastTouchedVersion = $v' "$configPath" > "$tmp_cfg" 2>/dev/null && mv "$tmp_cfg" "$configPath" || true
+# "Up to date" means doctor last SUCCEEDED on this version (DOCTOR_OK_MARKER),
+# not meta.lastTouchedVersion: openclaw stamps that on every config write, so a
+# failed doctor run used to be recorded as done and later boots skipped it.
+DOCTOR_OK_VER=$(cat "$DOCTOR_OK_MARKER" 2>/dev/null || echo "0")
+if [ "$IS_FRESH_INSTALL" -eq 1 ] && [ "$LEGACY_FILES_FOUND" -eq 0 ]; then
+  mkdir -p "$(dirname "$DOCTOR_OK_MARKER")" && echo "$CURRENT_VER" > "$DOCTOR_OK_MARKER" || true
+fi
+if [ "$LEGACY_FILES_FOUND" -eq 1 ] || { [ "$IS_FRESH_INSTALL" -eq 0 ] && [ "$DOCTOR_OK_VER" != "$CURRENT_VER" ]; }; then
+  echo "[amazeeai-config] OpenClaw upgrade/legacy state detected (doctor last succeeded on $DOCTOR_OK_VER, config $OLD_VER -> $CURRENT_VER). Running openclaw doctor --fix..."
+  if run_doctor_fix; then
+    echo "$CURRENT_VER" > "$DOCTOR_OK_MARKER" || true
+  else
+    echo "[amazeeai-config] WARNING: openclaw doctor --fix did not complete; it will run again on the next boot."
   fi
 else
   echo "[amazeeai-config] Fresh deployment or up-to-date state; skipping openclaw doctor --fix."
