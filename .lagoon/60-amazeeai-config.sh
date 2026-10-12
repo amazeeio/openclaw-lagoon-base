@@ -1379,19 +1379,62 @@ maintain_agent_databases
 # every later repair. This platform never deletes agents, so a held store is
 # always one the gateway needs: run the restore doctor itself prints
 # ("openclaw agents add <id> ... to abort deletion and restore"), then run
-# doctor again so the skipped migrations finish. Returns doctor's exit status.
+# doctor again so the skipped migrations finish.
+# The reserved system agent ("openclaw", the setup assistant) has no restore
+# command (doctor: "is a reserved system agent and cannot be added or
+# deleted") and can be skipped with only a warning, yet the gateway refuses to
+# start on its unmigrated DB. It only holds setup-assistant sessions, so when
+# its DB still lags after doctor, move its agent dir out of agents/ (kept under
+# state-backups/) and rerun doctor, which drops the stale registry row.
+# Returns non-zero unless doctor succeeded AND every agent DB was migrated.
 run_doctor_fix() {
   doctor_out=$(openclaw doctor --fix --yes 2>&1)
   doctor_rc=$?
   printf '%s\n' "$doctor_out"
   restores=$(printf '%s\n' "$doctor_out" | sed -n 's/.*run openclaw agents add \([^ ]*\) --workspace \([^ ]*\) --agent-dir \([^ ]*\) --non-interactive to abort deletion.*/\1 \2 \3/p' | tr -d "'\"" | sort -u)
-  [ -n "$restores" ] || return $doctor_rc
-  printf '%s\n' "$restores" | while read -r agent_id workspace agent_dir; do
-    echo "[amazeeai-config] Restoring agent store doctor held back: $agent_id ($agent_dir)"
-    openclaw agents add "$agent_id" --workspace "$workspace" --agent-dir "$agent_dir" --non-interactive || true
+  if [ -n "$restores" ]; then
+    printf '%s\n' "$restores" | while read -r agent_id workspace agent_dir; do
+      echo "[amazeeai-config] Restoring agent store doctor held back: $agent_id ($agent_dir)"
+      openclaw agents add "$agent_id" --workspace "$workspace" --agent-dir "$agent_dir" --non-interactive || true
+    done
+    echo "[amazeeai-config] Re-running openclaw doctor --fix after restoring held agent stores..."
+    openclaw doctor --fix --yes 2>&1
+    doctor_rc=$?
+  fi
+  case "$(agent_dbs_lagging)" in
+    */agents/openclaw/agent/*)
+      backup="/home/.openclaw/state-backups/system-agent-openclaw-$(date +%s)"
+      echo "[amazeeai-config] System agent openclaw DB was not migrated (doctor cannot restore reserved agents); moving /home/.openclaw/agents/openclaw to $backup"
+      mkdir -p /home/.openclaw/state-backups && mv /home/.openclaw/agents/openclaw "$backup" || true
+      echo "[amazeeai-config] Re-running openclaw doctor --fix after moving the system agent store aside..."
+      openclaw doctor --fix --yes 2>&1
+      doctor_rc=$?
+      ;;
+  esac
+  [ "$doctor_rc" -eq 0 ] || return $doctor_rc
+  # Doctor exits 0 even when it skips a DB with only a warning; the gateway
+  # then refuses that DB at startup. Fail unless no agent DB lags behind.
+  lagging=$(agent_dbs_lagging)
+  if [ -n "$lagging" ]; then
+    echo "[amazeeai-config] WARNING: agent databases still need migration after doctor: $lagging"
+    return 1
+  fi
+}
+
+# Prints agent DBs whose schema (sqlite user_version) is below the media
+# migration floor or behind the newest agent DB on this volume.
+# ponytail: relative check, not OpenClaw's exact current schema version, so a
+# volume where doctor migrated nothing at all is only caught below 17.
+agent_dbs_lagging() {
+  command -v sqlite3 >/dev/null 2>&1 || return 0
+  versions=""
+  for db in /home/.openclaw/agents/*/agent/openclaw-agent.sqlite; do
+    [ -f "$db" ] || continue
+    versions="$versions$(sqlite3 -readonly "$db" 'pragma user_version' 2>/dev/null || echo 0) $db
+"
   done
-  echo "[amazeeai-config] Re-running openclaw doctor --fix after restoring held agent stores..."
-  openclaw doctor --fix --yes 2>&1
+  max=$(printf '%s' "$versions" | awk '$1>m{m=$1} END{print m+0}')
+  printf '%s' "$versions" | awk -v m="$max" '$1<17 || $1<m {printf "%s (v%s) ", $2, $1}'
 }
 DOCTOR_OK_MARKER=/home/.openclaw/state/.doctor-ok-version
 
@@ -1437,7 +1480,11 @@ DOCTOR_OK_VER=$(cat "$DOCTOR_OK_MARKER" 2>/dev/null || echo "0")
 if [ "$IS_FRESH_INSTALL" -eq 1 ] && [ "$LEGACY_FILES_FOUND" -eq 0 ]; then
   mkdir -p "$(dirname "$DOCTOR_OK_MARKER")" && echo "$CURRENT_VER" > "$DOCTOR_OK_MARKER" || true
 fi
-if [ "$LEGACY_FILES_FOUND" -eq 1 ] || { [ "$IS_FRESH_INSTALL" -eq 0 ] && [ "$DOCTOR_OK_VER" != "$CURRENT_VER" ]; }; then
+# A lagging agent DB also forces doctor: a marker written before the
+# migration check above existed can claim success the gateway disagrees with.
+LAGGING_AGENT_DBS=$(agent_dbs_lagging)
+if [ "$LEGACY_FILES_FOUND" -eq 1 ] || [ -n "$LAGGING_AGENT_DBS" ] || { [ "$IS_FRESH_INSTALL" -eq 0 ] && [ "$DOCTOR_OK_VER" != "$CURRENT_VER" ]; }; then
+  [ -z "$LAGGING_AGENT_DBS" ] || echo "[amazeeai-config] Agent databases need migration: $LAGGING_AGENT_DBS"
   echo "[amazeeai-config] OpenClaw upgrade/legacy state detected (doctor last succeeded on $DOCTOR_OK_VER, config $OLD_VER -> $CURRENT_VER). Running openclaw doctor --fix..."
   if run_doctor_fix; then
     echo "$CURRENT_VER" > "$DOCTOR_OK_MARKER" || true
