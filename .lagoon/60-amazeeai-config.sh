@@ -1242,7 +1242,22 @@ seed_default_plugins() {
         rm -rf "$dest"
         cp -RP "$src" "$dest"
       fi
+      # Older cores installed into "<name>__openclaw-generation__<ver>" dirs and
+      # the plugin index still points there, so a core upgrade kept loading e.g.
+      # slack 2026.6.5 on core 2026.10.2 ("cannot import openclaw/plugin-sdk/...").
+      # Those broken plugins also make CLI commands (agents add, doctor) fail.
+      # Drop them and rebuild the index so it records the seeded copy instead.
+      for stale in "$dest"__openclaw-generation__*; do
+        [ -d "$stale" ] || continue
+        echo "[amazeeai-config] Removing stale plugin generation $(basename "$stale")"
+        rm -rf "$stale"
+        plugins_reindex=1
+      done
     done
+    if [ -n "${plugins_reindex:-}" ]; then
+      echo "[amazeeai-config] Rebuilding plugin registry after removing stale plugin generations..."
+      openclaw plugins registry --refresh || true
+    fi
     echo "[amazeeai-config] Default channel plugins seeded from image"
   else
     echo "[amazeeai-config] WARNING: no baked plugin seed at $seed_projects; skipping default plugin seeding"
