@@ -1180,6 +1180,19 @@ fi
 # every seeded plugin, racing the gateway's startup plugin verification.
 CURRENT_VER=$(openclaw --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' | head -n1 || echo "unknown")
 
+# Empty legacy identity files (seen on old volumes, likely interrupted writes)
+# hold no data, but doctor's device-auth migration fails to parse them
+# ("Unexpected end of JSON input"), refuses every later migration step, and
+# the gateway then refuses to start on the leftover device.json. Move them
+# aside so doctor skips them and the gateway creates a fresh identity.
+for f in /home/.openclaw/identity/device-auth.json /home/.openclaw/identity/device.json; do
+  if [ -f "$f" ] && [ ! -s "$f" ]; then
+    backup="/home/.openclaw/state-backups/empty-identity-$(date +%s)"
+    echo "[amazeeai-config] Moving empty legacy identity file $f to $backup/"
+    mkdir -p "$backup" && mv "$f" "$backup/" || true
+  fi
+done
+
 LEGACY_FILES_FOUND=0
 if [ -f "/home/.openclaw/subagents/runs.json" ] || [ -f "/home/.openclaw/workspace/setup-state.json" ] || [ -f "/home/.openclaw/workspace/.setup-state" ]; then
   LEGACY_FILES_FOUND=1
