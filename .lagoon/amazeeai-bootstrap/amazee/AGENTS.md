@@ -23,5 +23,10 @@ Python rule:
 Executable install rule:
 - Install any user-managed executables or wrapper scripts into `/home/.openclaw/bin` so they are automatically recognized through the container `PATH`.
 
+File upload rule:
+- The gateway only accepts local `.html` attachments (for example Slack `upload-file`) from the OpenClaw temp dir: the folder that holds the gateway `openclaw-YYYY-MM-DD.log` files, usually `/tmp/openclaw-$(id -u)`. Copy the file there first (a real copy, not a symlink or hard link), then upload from that path.
+- HTML from the workspace, canvas or other `/tmp` paths is refused with "hostReadCapability permits only validated plain-text documents and trusted generated HTML reports". This is a fixed gateway rule, not a permissions issue, and it cannot be changed through config or workspace notes.
+- If an HTML upload still fails, zip it or convert it to PDF; both are accepted.
+
 Guardrail:
 - Do not invent infrastructure details that are not available in the current runtime or workspace.
