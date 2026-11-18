@@ -1518,6 +1518,26 @@ echo "[amazeeai-config] Note: OpenClaw may take a moment to initialize (no outpu
 # Only when this container is starting the gateway ("$@" is its command).
 case "$*" in
   *gateway*)
+    # Reclaim plugin capture roots left by exited OpenClaw processes. OpenClaw's
+    # hourly sweep keeps native/ payloads and token-less roots forever, and its
+    # startup cleanup can skip silently, so each restart leaked ~300-800MB onto
+    # the 5Gi volume until plugins failed with ENOSPC. Before the gateway starts
+    # no OpenClaw process owns a root; keep any the live plugin index
+    # (state/openclaw.sqlite) still names. Skip if a gateway is already running.
+    # ponytail: drop once upstream reclaims native/ and token-less roots itself.
+    CAPTURES=/home/.openclaw/tmp/plugin-captures
+    if [ -d "$CAPTURES" ] && ! grep -qsx openclaw-gateway /proc/[0-9]*/comm; then
+      for root in "$CAPTURES"/*/; do
+        [ -d "$root" ] || continue
+        id=$(basename "$root")
+        if grep -qa "$id" /home/.openclaw/state/openclaw.sqlite /home/.openclaw/state/openclaw.sqlite-wal 2>/dev/null; then
+          echo "[amazeeai-config] Keeping plugin capture $id (referenced by the plugin index)"
+        else
+          echo "[amazeeai-config] Removing orphaned plugin capture $id ($(du -sh "$root" 2>/dev/null | cut -f1))"
+          rm -rf "$root"
+        fi
+      done
+    fi
     if [ -n "$AMAZEEAI_BASE_URL" ] && [ "$AMAZEEAI_DISABLE_BACKGROUND_REFRESH" != "true" ]; then
       echo "[amazeeai-config] Starting daily amazee.ai model refresh in the background"
       (while sleep 86400; do node /lagoon/amazeeai-model-refresher.js; done) &
