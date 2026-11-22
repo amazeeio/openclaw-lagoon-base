@@ -2,7 +2,7 @@ ARG OPENCLAW_VERSION=2026.11.6
 ARG RELEASE_VERSION=2026.11.6
 
 # Stage 1: Get Lagoon commons tools
-FROM uselagoon/commons:26.11.2@sha256:3d7a05201004292f308dd037ffd702f794cb8e23c0561044959f9a6f0707fd2d AS commons
+FROM uselagoon/commons:26.11.4@sha256:308a7a2c459404ef26abb6e2667a41913022327996c0bbb76755b1a435b74a6e AS commons
 
 # Stage 2: Build the runtime image from the official OpenClaw image
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}-browser
